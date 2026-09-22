@@ -263,3 +263,94 @@ def _overlaps(a: tuple[float, float], b: tuple[float, float]) -> bool:
 
 def _clamp(value: float) -> float:
     return float(min(1.0, max(0.0, value)))
+
+
+# ---------------------------------------------------------------------- duplicates
+
+HASH_SIZE = 8
+"""Produces a 64-bit fingerprint: 8 rows of 8 horizontal comparisons."""
+
+DUPLICATE_THRESHOLD = 10
+"""Hamming distance below which two images are treated as the same shot.
+
+Tuned loose on purpose. Five burst frames of the same scene differ by a few bits;
+a re-framed second take of the same subject differs by rather more. Missing a
+duplicate only costs a near-repeat in the cut, while falsely merging two different
+moments silently loses one of them - so the threshold errs toward merging less.
+"""
+
+
+def perceptual_hash(frame: Frame) -> int:
+    """A dHash: 64 bits describing the frame's coarse structure.
+
+    Each bit asks whether one cell of a tiny greyscale thumbnail is brighter than the
+    cell to its right. Because it records *relative* brightness, it is unbothered by
+    exposure shifts, resizing and compression - two exports of the same photo at
+    different quality hash identically, which is exactly what a camera roll needs.
+    """
+    thumbnail = _downsample(frame, HASH_SIZE + 1, HASH_SIZE)
+    if thumbnail.size == 0:
+        return 0
+    bits = thumbnail[:, :-1] > thumbnail[:, 1:]
+    value = 0
+    for bit in bits.flatten():
+        value = (value << 1) | int(bit)
+    return value
+
+
+def hamming(left: int, right: int) -> int:
+    """How many bits two fingerprints differ by. 0 is identical, 64 is unrelated."""
+    return int(left ^ right).bit_count()
+
+
+def group_duplicates(
+    hashes: dict[str, int], *, threshold: int = DUPLICATE_THRESHOLD
+) -> dict[str, str]:
+    """Map asset id -> group id for near-identical shots.
+
+    Only ids belonging to a group of two or more appear in the result; a one-of-a-kind
+    shot is left ungrouped rather than put in a group of itself.
+
+    Each item is compared against group *representatives* rather than against every
+    member. That prevents chaining, where A matches B and B matches C but A and C are
+    plainly different shots, which would quietly merge a whole afternoon into one group.
+    """
+    representatives: list[tuple[str, int]] = []
+    assigned: dict[str, str] = {}
+
+    for asset_id in sorted(hashes):
+        fingerprint = hashes[asset_id]
+        match = next(
+            (rep for rep, value in representatives if hamming(value, fingerprint) <= threshold),
+            None,
+        )
+        if match is None:
+            representatives.append((asset_id, fingerprint))
+            assigned[asset_id] = f"dup-{asset_id[:8]}"
+        else:
+            assigned[asset_id] = f"dup-{match[:8]}"
+
+    counts: dict[str, int] = {}
+    for group in assigned.values():
+        counts[group] = counts.get(group, 0) + 1
+    return {asset: group for asset, group in assigned.items() if counts[group] > 1}
+
+
+def _downsample(frame: Frame, width: int, height: int) -> Frame:
+    """Area-average down to a tiny thumbnail.
+
+    Averaging rather than sampling matters: point sampling would let one noisy pixel
+    flip a bit and make two copies of the same photo hash differently.
+    """
+    if frame.size == 0 or width < 1 or height < 1:
+        return np.zeros((0, 0))
+    rows = np.linspace(0, frame.shape[0], height + 1).astype(int)
+    cols = np.linspace(0, frame.shape[1], width + 1).astype(int)
+    out = np.zeros((height, width))
+    for i in range(height):
+        for j in range(width):
+            block = frame[
+                rows[i] : max(rows[i] + 1, rows[i + 1]), cols[j] : max(cols[j] + 1, cols[j + 1])
+            ]
+            out[i, j] = block.mean() if block.size else 0.0
+    return out
