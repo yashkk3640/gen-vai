@@ -108,7 +108,7 @@ beginning with scene one of an essay.
 
 **`style_suffix`** is appended to every generated image prompt. Holding one phrase
 constant is the cheapest defence against each shot looking like a different video.
-It narrows drift; it does not eliminate it (docs/07-backlog.md B2).
+It narrows drift; it does not eliminate it ('Character and scene consistency' in docs/07-backlog.md).
 
 **`safe_area`** marks the fractions of the canvas covered by platform UI. Text placed
 outside those bounds is not read, so the renderer treats it as a hard constraint on

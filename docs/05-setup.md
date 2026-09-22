@@ -27,7 +27,7 @@ Optional extras, installed only where the hardware supports them:
 ```bash
 uv sync --extra image        # torch + diffusers (~3 GB, needs a GPU)
 uv sync --extra tts          # Piper narration (CPU)
-uv sync --extra asr          # faster-whisper (Mode C)
+uv sync --extra asr          # faster-whisper (footage mode)
 uv sync --extra dev          # pytest, ruff, mypy
 ```
 

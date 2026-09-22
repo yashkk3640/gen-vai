@@ -5,7 +5,7 @@ filesystem - sits behind a Protocol here. Core and pipeline code imports only fr
 this module, never from `adapters`.
 
 Keeping all of them together is deliberate: the entire surface the project depends on
-should be readable in one sitting. See docs/06-decisions.md D5.
+should be readable in one sitting. See 'Ports and adapters' in docs/06-decisions.md.
 """
 
 from pathlib import Path
@@ -53,7 +53,7 @@ class LLMPort(Protocol):
         """Release the model from VRAM.
 
         Called at the plan/resolve phase boundary; at 4 GB the LLM and the diffusion
-        model cannot coexist. See docs/06-decisions.md D8.
+        model cannot coexist. See 'Phase-ordered model loading' in docs/06-decisions.md.
         """
         ...
 
@@ -120,14 +120,15 @@ class MusicProvider(Protocol):
 
         Raises `ConfirmationRequired` unless `confirmed` is True. The flag is passed
         explicitly rather than read from config so that no call site can reach the
-        network without the consent being visible in the code. See docs/06-decisions.md D4.
+        network without the consent being visible in the code.
+        See 'Music consent' in docs/06-decisions.md.
         """
         ...
 
 
 @runtime_checkable
 class TranscriptProvider(Protocol):
-    """Audio to timed transcript. Needed only for Mode C (existing footage)."""
+    """Audio to timed transcript. Needed only for footage mode (existing footage)."""
 
     def is_available(self) -> bool: ...
 

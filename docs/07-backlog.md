@@ -7,13 +7,21 @@ requirements (Reels, Shorts, TikTok).
 Items that were cheap enough to fold straight into the schema are **not** here - they
 are already in `timeline.py` and listed at the bottom for reference.
 
+- [Image fidelity ceiling](#image-fidelity-ceiling)
+- [Character and scene consistency](#character-and-scene-consistency)
+- [Motion that does not read as a slideshow](#motion-that-does-not-read-as-a-slideshow)
+- [Trending audio workflow](#trending-audio-workflow)
+- [Should footage mode be built before idea mode?](#should-footage-mode-be-built-before-idea-mode)
+- [Retention feedback loop](#retention-feedback-loop)
+- [Auto-reframe and face tracking](#auto-reframe-and-face-tracking)
+
 > Platform mechanics move faster than this document. The reach and distribution claims
 > below were accurate as understood in mid-2026; re-check them before betting a
 > milestone on one.
 
 ---
 
-## B1 - Image fidelity ceiling
+## Image fidelity ceiling
 
 **Blocked by hardware.**
 
@@ -34,7 +42,7 @@ The port boundary means this is an adapter swap whenever it becomes worth doing.
 
 ---
 
-## B2 - Character and scene consistency
+## Character and scene consistency
 
 **Hard, not blocked.**
 
@@ -48,7 +56,7 @@ recurring character does not.
 
 ---
 
-## B3 - Motion that does not read as a slideshow
+## Motion that does not read as a slideshow
 
 **Partially addressed.**
 
@@ -64,7 +72,7 @@ Beat-synced cutting is the best value here: it needs onset detection, not a mode
 
 ---
 
-## B4 - Trending audio workflow
+## Trending audio workflow
 
 **Partially addressed.**
 
@@ -80,16 +88,17 @@ sound manually, accept that cut timing will not match the track.
 
 ---
 
-## B5 - Mode C should probably outrank Mode A
+## Should footage mode be built before idea mode?
 
 **A prioritisation question, not a technical one.**
 
 For competitive short-form output on this hardware, editing existing footage beats
-generating stills. The source material is already real, so B1 and B2 stop mattering
+generating stills. The source material is already real, so the image fidelity and
+character consistency problems above stop mattering
 entirely, and the LLM is left doing what it is genuinely good at: choosing moments,
 pacing, and writing captions.
 
-Mode C is currently M7, last. If short-form output is the actual goal rather than
+footage mode is currently M7, last. If short-form output is the actual goal rather than
 text-to-video as such, it belongs at M2, right after the render path.
 
 Deliberately not reordered yet - that is a product call, and the roadmap notes it as
@@ -97,7 +106,7 @@ open rather than assuming an answer.
 
 ---
 
-## B6 - Retention feedback loop
+## Retention feedback loop
 
 **Not started.**
 
@@ -110,10 +119,10 @@ turn a set of assumptions into something that actually learns.
 
 ---
 
-## B7 - Auto-reframe and face tracking
+## Auto-reframe and face tracking
 
-**Needed for Mode C.** Cropping a 16:9 talking head to 9:16 without cutting the
-speaker's head off needs face detection and a smoothed crop path. Blocked on Mode C
+**Needed for footage mode.** Cropping a 16:9 talking head to 9:16 without cutting the
+speaker's head off needs face detection and a smoothed crop path. Blocked on footage mode
 being scheduled.
 
 ---

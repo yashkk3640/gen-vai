@@ -10,9 +10,15 @@ They describe what they want, watch the result, and say what to change.
 
 ## Three input modes
 
-The system must handle all three with one pipeline.
+Named after what the user already has. The system handles all three with one pipeline.
 
-### Mode A - Vision only (no files)
+| Mode | You have | The system does |
+| --- | --- | --- |
+| **Idea mode** | nothing but a description | writes, generates and renders everything |
+| **Photo mode** | images | orders them, times them, adds text and music |
+| **Footage mode** | a long recording | transcribes, finds the good parts, cuts clips |
+
+### Idea mode - you have nothing but an idea
 
 > "Make me a 30-second vertical video explaining why compound interest matters,
 > calm tone, soft piano."
@@ -20,14 +26,14 @@ The system must handle all three with one pipeline.
 Nothing is provided. The system writes the script, generates every visual,
 synthesises narration, proposes music, and renders.
 
-### Mode B - Images provided
+### Photo mode - you have images
 
 > "Here are 12 photos from the trip. Make a 45-second reel."
 
 The system orders them, decides timing and motion, writes on-screen text,
 and proposes music if none was given.
 
-### Mode C - Footage provided
+### Footage mode - you have a recording
 
 > "Here is a 40-minute talk. Cut it into three shorts."
 

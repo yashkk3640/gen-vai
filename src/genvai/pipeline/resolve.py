@@ -56,6 +56,6 @@ def fetch_approved_music(
     """Download the selected track and record its licence.
 
     Requires `state == "approved"` and `confirmed is True`; raises
-    `ConfirmationRequired` otherwise. See docs/06-decisions.md D4.
+    `ConfirmationRequired` otherwise. See 'Music consent' in docs/06-decisions.md.
     """
     raise NotImplementedError

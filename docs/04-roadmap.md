@@ -21,8 +21,8 @@ implementation, so implementation does not thrash.
 | M3 | Conversational edit loop + incremental re-render | |
 | M4 | Local diffusion visuals | |
 | M5 | Narration TTS + music suggestion/confirm/download | |
-| M6 | Mode B: user-supplied images | |
-| M7 | Mode C: existing footage -> shorts | |
+| M6 | Photo mode: user-supplied images | |
+| M7 | Footage mode: long recording -> clips | |
 
 ## M1 - Render path first
 
@@ -84,13 +84,13 @@ upscale with ffmpeg `lanczos`. Procedural fallback stays available throughout.
 - music query -> candidates -> **confirm** -> download -> licence recorded
 - sidechain ducking under narration
 
-## M6 - User images
+## M6 - Photo mode
 
 - ingest, hash, EXIF orientation, aspect-fit to canvas
 - LLM orders them and assigns motion from actual image content
 - requires a vision model, or captioning at ingest so the text LLM can reason about them
 
-## M7 - Existing footage
+## M7 - Footage mode
 
 - faster-whisper transcript with word timings
 - LLM highlight selection -> cut list
@@ -99,7 +99,7 @@ upscale with ffmpeg `lanczos`. Procedural fallback stays available throughout.
 
 ## Known open questions
 
-1. **Should Mode C outrank Mode A?** For competitive short-form output on 4 GB,
+1. **Should footage mode be built before idea mode?** For competitive short-form output on 4 GB,
    editing real footage sidesteps the image-fidelity ceiling entirely and leaves the
    LLM doing what it is best at. That argues for moving M7 to M2. It is a product
    call, not a technical one, so it is recorded rather than assumed

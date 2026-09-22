@@ -113,7 +113,7 @@ is readable in a single sitting.
 | `ImageProvider` | prompt -> still image | `diffusers` local SD | procedural card |
 | `SpeechProvider` | text -> narration audio | Piper (CPU) | silence |
 | `MusicProvider` | describe -> candidates; fetch on approval | local library | no music |
-| `TranscriptProvider` | audio -> timed transcript | faster-whisper | not required until Mode C |
+| `TranscriptProvider` | audio -> timed transcript | faster-whisper | not required until footage mode |
 | `RendererPort` | timeline -> video file | ffmpeg | none (required) |
 | `ProjectStore` | load/save project + versions | filesystem | none (required) |
 

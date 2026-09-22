@@ -3,9 +3,20 @@
 Why the project looks the way it does. Each entry records what was rejected, because
 that is usually the part that gets forgotten and re-litigated.
 
+- [Motion from stills, not generative video](#motion-from-stills-not-generative-video)
+- [Timeline JSON as the single source of truth](#timeline-json-as-the-single-source-of-truth)
+- [Typed edit operations, not free-form timeline rewrites](#typed-edit-operations-not-free-form-timeline-rewrites)
+- [Music consent: suggested, downloaded only on confirmation](#music-consent-suggested-downloaded-only-on-confirmation)
+- [Ports and adapters, protocols in one file](#ports-and-adapters-protocols-in-one-file)
+- [uv, with heavy stacks as optional extras](#uv-with-heavy-stacks-as-optional-extras)
+- [Bundled ffmpeg via imageio-ffmpeg](#bundled-ffmpeg-via-imageio-ffmpeg)
+- [Phase-ordered model loading](#phase-ordered-model-loading)
+- [Filesystem as the store](#filesystem-as-the-store)
+- [Frozen pydantic models](#frozen-pydantic-models)
+
 ---
 
-### D1 - Still images plus camera motion, not generative video
+### Motion from stills, not generative video
 
 **Decision.** Video is produced by animating stills (Ken Burns, parallax, transitions)
 via ffmpeg, not by a video diffusion model.
@@ -22,7 +33,7 @@ without changing the pipeline.
 
 ---
 
-### D2 - Timeline JSON as the single source of truth
+### Timeline JSON as the single source of truth
 
 **Decision.** An immutable, versioned `Timeline` document holds all editorial state.
 Planning writes it, edits patch it, rendering reads it.
@@ -36,7 +47,7 @@ non-deterministic, expensive, and it silently changes parts the user was happy w
 
 ---
 
-### D3 - Typed edit operations, not free-form timeline rewrites
+### Typed edit operations, not free-form timeline rewrites
 
 **Decision.** On an edit the LLM returns a validated list of ops from a closed
 vocabulary.
@@ -51,7 +62,7 @@ and a wrong path silently writes to the wrong place.
 
 ---
 
-### D4 - Music is suggested, downloaded only on confirmation
+### Music consent: suggested, downloaded only on confirmation
 
 **Decision.** The LLM describes a track; the provider returns candidates; nothing is
 fetched until the user approves a specific one. Licence and source URL are recorded.
@@ -66,7 +77,7 @@ large music library in git (repo bloat).
 
 ---
 
-### D5 - Ports and adapters, protocols in one file
+### Ports and adapters, protocols in one file
 
 **Decision.** Every external dependency sits behind a `typing.Protocol` in
 `genvai/ports.py`; adapters are the only impure code.
@@ -81,7 +92,7 @@ welds the design to today's tools.
 
 ---
 
-### D6 - uv, with heavy stacks as optional extras
+### uv, with heavy stacks as optional extras
 
 **Decision.** `uv` manages the environment. Base install is small; torch, TTS and ASR
 are extras.
@@ -95,7 +106,7 @@ would force a 3 GB download on machines that will only ever use procedural visua
 
 ---
 
-### D7 - Bundled ffmpeg via imageio-ffmpeg
+### Bundled ffmpeg via imageio-ffmpeg
 
 **Decision.** ffmpeg arrives as a pip dependency. A system ffmpeg on PATH wins if present.
 
@@ -108,7 +119,7 @@ The PATH-first lookup means anyone needing more just installs ffmpeg normally.
 
 ---
 
-### D8 - Phase-ordered model loading
+### Phase-ordered model loading
 
 **Decision.** All LLM work for a run completes before any diffusion model loads.
 The two never share the GPU.
@@ -123,7 +134,7 @@ diffusion model unloaded.
 
 ---
 
-### D9 - Filesystem as the store
+### Filesystem as the store
 
 **Decision.** A project is a directory. Content-addressed assets, one JSON file per
 timeline version.
@@ -137,7 +148,7 @@ writers and no query needs.
 
 ---
 
-### D10 - Frozen pydantic models
+### Frozen pydantic models
 
 **Decision.** Domain models are frozen pydantic v2 models.
 

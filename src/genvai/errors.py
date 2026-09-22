@@ -61,5 +61,5 @@ class ConfirmationRequired(GenvaiError):
     """An action needing explicit user consent was attempted without it.
 
     Currently only music downloads. This is a guard against a code path
-    reaching the network implicitly; see docs/06-decisions.md D4.
+    reaching the network implicitly; see 'Music consent' in docs/06-decisions.md.
     """

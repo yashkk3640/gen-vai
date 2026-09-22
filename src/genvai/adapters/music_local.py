@@ -3,7 +3,7 @@
 `search` scans the local cache first and only consults remote catalogues for metadata.
 `fetch` is the sole place in the project that writes a network resource to disk, and it
 refuses to run without an explicit `confirmed=True` from a call site that asked the
-user. See docs/06-decisions.md D4.
+user. See 'Music consent' in docs/06-decisions.md.
 """
 
 from pathlib import Path

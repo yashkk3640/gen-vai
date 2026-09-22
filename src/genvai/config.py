@@ -51,7 +51,7 @@ class MusicSettings(BaseModel):
         default=False,
         description=(
             "Master switch only. Even when true, each track still needs explicit "
-            "per-track confirmation; see docs/06-decisions.md D4."
+            "per-track confirmation; see 'Music consent' in docs/06-decisions.md."
         ),
     )
 

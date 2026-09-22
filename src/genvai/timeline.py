@@ -233,7 +233,7 @@ class Music(Frozen):
     """Music, as a state machine.
 
     Nothing is downloaded until `state` reaches `approved`, and that transition can
-    only be made by an explicit user choice. See docs/06-decisions.md D4.
+    only be made by an explicit user choice. See 'Music consent' in docs/06-decisions.md.
     """
 
     state: MusicState = "none"
@@ -371,7 +371,8 @@ class Timeline(Frozen):
         description=(
             "Appended to every generated image prompt. Holding one phrase constant "
             "across scenes is the cheapest defence against each shot looking like it "
-            "came from a different video. A partial fix - see docs/07-backlog.md B3."
+            "came from a different video. A partial fix - see "
+            "'Character and scene consistency' in docs/07-backlog.md."
         ),
     )
 

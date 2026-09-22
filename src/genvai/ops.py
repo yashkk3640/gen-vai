@@ -2,7 +2,7 @@
 
 On an edit request the model returns `{"ops": [...]}`, never a replacement timeline.
 Each op is small, individually validatable, and applied atomically with the rest -
-see docs/06-decisions.md D3 for why.
+see 'Typed edit operations' in docs/06-decisions.md for why.
 
 `apply` is pure and total: `Timeline -> Timeline`. Validation happens first, over the
 whole list, so a rejected op leaves the project untouched.

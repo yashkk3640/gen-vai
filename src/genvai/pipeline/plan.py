@@ -2,7 +2,7 @@
 
 The planner emits a complete storyboard in a single pass. It cannot look at a
 generated image and reconsider, because the LLM is unloaded before the diffusion model
-loads - see docs/06-decisions.md D8.
+loads - see 'Phase-ordered model loading' in docs/06-decisions.md.
 """
 
 from pathlib import Path
@@ -21,8 +21,8 @@ def plan(
 ) -> Timeline:
     """Turn a free-text intent into a schema-valid timeline.
 
-    With `assets`, plans around the user's images (Mode B) instead of writing prompts
-    for new ones (Mode A).
+    With `assets`, plans around the user's images (photo mode) instead of writing prompts
+    for new ones (idea mode).
 
     Raises `PlanningError` if the model cannot produce valid output within its retries.
     """
