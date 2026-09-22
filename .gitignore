@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+build/
+dist/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Local config
+.env
+
+# Generated output and caches (never committed - large binaries)
+projects/*/
+!projects/.gitkeep
+assets/music_cache/*
+!assets/music_cache/.gitkeep
+models/
+*.mp4
+*.mov
+*.wav
+*.mp3
+*.safetensors
+*.ckpt
+
+# Editors / OS
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
