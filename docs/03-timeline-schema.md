@@ -86,6 +86,27 @@ All models are **frozen** (immutable). Mutation is impossible; transforms return
 }
 ```
 
+## Clips versus photos
+
+A scene's `visual` is a discriminated union. Camera-roll editing uses two members:
+
+```json
+{ "kind": "clip",  "asset_id": "vid_3a1f", "source_start": 6.2, "source_end": 8.6,
+  "crop": [0.2, 0.0, 0.6, 1.0], "fit": "cover", "speed": 1.0, "mute": true }
+
+{ "kind": "asset", "asset_id": "img_77c2", "fit": "blur_pad" }
+```
+
+`source_start` and `source_end` **are** the edit: a fifteen-second phone clip keeps the
+two seconds worth keeping. `Scene.duration` must equal `(source_end - source_start) / speed`.
+
+They are kept as separate fields rather than deriving one from the other because
+"hold that shot longer" and "show more of that clip" are different requests, and the
+edit vocabulary needs to express both.
+
+`mute` defaults to true. Camera-roll audio is usually wind and chatter; the bed is
+music unless a clip's own sound is the point.
+
 ## Field notes
 
 **`version`** increments on every applied edit. `schema_version` changes only when the
@@ -165,6 +186,12 @@ by pydantic; an unknown `op` value is rejected outright.
 | `set_scene_duration` | `scene_id`, `seconds` | Retime one scene |
 | `scale_all_durations` | `factor` | "make the whole thing faster" |
 | `set_visual_prompt` | `scene_id`, `prompt`, `negative_prompt?` | Clears `asset_id`, forcing regeneration |
+| `set_clip_span` | `scene_id`, `source_start`, `source_end` | Retrim; adjusts scene duration to match |
+| `nudge_clip_span` | `scene_id`, `seconds` | Shift the trim, keeping its length and the beat alignment |
+| `set_clip_speed` | `scene_id`, `speed` | Slow-motion or speed-up |
+| `set_crop` | `scene_id`, `crop?`, `fit?` | Reframe inside the canvas |
+| `set_clip_muted` | `scene_id`, `mute` | Unmute a clip whose own audio matters |
+| `replace_source` | `scene_id`, `asset_id` | Use a different take, keeping timing |
 | `set_motion` | `scene_id`, `motion` | Change the camera move |
 | `set_narration` | `scene_id`, `text` | Rewrite the line, clears its audio asset |
 | `set_overlay_text` | `scene_id`, `index`, `content` | Edit on-screen text |

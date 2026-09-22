@@ -17,6 +17,9 @@ Seconds = Annotated[float, Field(ge=0.0)]
 Unit = Annotated[float, Field(ge=0.0, le=1.0)]
 """A fraction of the canvas, so geometry is resolution-independent."""
 
+Rect = tuple[Unit, Unit, Unit, Unit]
+"""(x, y, w, h) as fractions of the frame it applies to."""
+
 
 class Frozen(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -74,12 +77,62 @@ class GeneratedVisual(Frozen):
     )
 
 
+Fit = Literal["cover", "contain", "blur_pad"]
+"""How source material fills a canvas of a different shape.
+
+`cover` crops to fill, `contain` letterboxes, `blur_pad` fills the margins with a
+blurred copy of the source - the usual choice when a landscape phone clip has to sit
+in a vertical frame without losing its edges.
+"""
+
+
 class AssetVisual(Frozen):
-    """An image the user supplied."""
+    """A photo the user supplied."""
 
     kind: Literal["asset"] = "asset"
     asset_id: str
-    fit: Literal["cover", "contain", "blur_pad"] = "cover"
+    fit: Fit = "cover"
+    crop: Rect | None = Field(
+        default=None, description="None auto-fits; a rect picks the region to keep."
+    )
+
+
+class ClipVisual(Frozen):
+    """A trimmed span of one of the user's own video clips.
+
+    The core of camera-roll editing. A phone clip is typically 10-20 seconds of which
+    two are worth keeping, so the span is the edit: `source_start` and `source_end`
+    say which part survives.
+
+    `Scene.duration` must equal `source_duration / speed`. Keeping them as separate
+    fields rather than deriving one lets a scene be retimed and the trim adjusted
+    independently, which is what a user means by "hold that shot longer" versus
+    "show more of that clip".
+    """
+
+    kind: Literal["clip"] = "clip"
+    asset_id: str
+    source_start: Seconds = 0.0
+    source_end: Seconds
+    crop: Rect | None = None
+    fit: Fit = "cover"
+    speed: float = Field(default=1.0, gt=0.1, le=10.0)
+    mute: bool = Field(
+        default=True,
+        description=(
+            "Camera-roll audio is usually wind and chatter. Muted by default; unmute "
+            "deliberately when the clip's own sound is the point."
+        ),
+    )
+
+    @property
+    def source_duration(self) -> float:
+        return max(0.0, self.source_end - self.source_start)
+
+    @property
+    def output_duration(self) -> float:
+        """How long this occupies the timeline once speed is applied."""
+        return self.source_duration / self.speed
 
 
 class CardVisual(Frozen):
@@ -96,15 +149,12 @@ class ColorVisual(Frozen):
 
 
 Visual = Annotated[
-    GeneratedVisual | AssetVisual | CardVisual | ColorVisual,
+    ClipVisual | AssetVisual | GeneratedVisual | CardVisual | ColorVisual,
     Field(discriminator="kind"),
 ]
 
 
 # --------------------------------------------------------------------------- motion
-
-Rect = tuple[Unit, Unit, Unit, Unit]
-"""(x, y, w, h) in canvas fractions."""
 
 Easing = Literal["linear", "ease_in", "ease_out", "ease_in_out"]
 
@@ -229,6 +279,21 @@ class MusicCandidate(Frozen):
     attribution: str | None = None
 
 
+class BeatMap(Frozen):
+    """Onset times in the music bed.
+
+    Cuts landing on the beat are most of what separates a reel that feels edited
+    from one that feels assembled. Onset detection is signal processing, not a
+    model - it runs on CPU in about a second.
+    """
+
+    bpm: float = Field(ge=20.0, le=300.0)
+    beats: tuple[Seconds, ...] = ()
+    downbeats: tuple[Seconds, ...] = Field(
+        default=(), description="Bar starts. Stronger cut points than ordinary beats."
+    )
+
+
 class Music(Frozen):
     """Music, as a state machine.
 
@@ -243,6 +308,9 @@ class Music(Frozen):
     asset_id: str | None = None
     gain_db: float = -18.0
     duck_under_narration: bool = True
+    beat_map: BeatMap | None = Field(
+        default=None, description="Populated on resolve, when a track exists to analyse."
+    )
 
     @property
     def is_renderable(self) -> bool:
@@ -289,6 +357,13 @@ class Export(Frozen):
     """What gets written out, and in what shape."""
 
     audio_variants: tuple[AudioVariant, ...] = ("full", "narration_only")
+    snap_cuts_to_beat: bool = Field(
+        default=True,
+        description=(
+            "Nudge scene boundaries onto the nearest beat when a beat map exists. "
+            "Scene durations shift by a few frames; the cut lands with the music."
+        ),
+    )
     seamless_loop: bool = Field(
         default=False,
         description=(

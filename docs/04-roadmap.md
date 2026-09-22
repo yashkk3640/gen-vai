@@ -15,87 +15,78 @@ implementation, so implementation does not thrash.
 
 | | Milestone | State |
 | --- | --- | --- |
-| M0 | Docs, env, ports, timeline schema | **done** |
-| M1 | Render a timeline to MP4 (procedural visuals, no LLM) | next |
-| M2 | LLM planner: intent -> timeline | |
-| M3 | Conversational edit loop + incremental re-render | |
-| M4 | Local diffusion visuals | |
-| M5 | Narration TTS + music suggestion/confirm/download | |
-| M6 | Photo mode: user-supplied images | |
-| M7 | Footage mode: long recording -> clips | |
+| M0 | Docs, env, ports, timeline and media schemas | **done** |
+| M1 | Render path: timeline -> MP4, trims and crops included | next |
+| M2 | Ingest and analysis: camera roll -> media.json | |
+| M3 | Selection and assembly: library + intent -> timeline | |
+| M4 | Conversational edit loop + incremental re-render | |
+| M5 | Music, beat detection, beat-aligned cuts | |
+| M6 | Auto-reframe: keep the subject in frame when cropping to 9:16 | |
+| M7 | Idea mode: generated visuals and narration | parked |
 
 ## M1 - Render path first
 
-Deliberately before the LLM. A hand-written timeline JSON renders to MP4 using
-procedural cards and Ken Burns motion.
+A hand-written timeline renders to MP4. Deliberately before any analysis or LLM work,
+because everything downstream produces timelines and nothing can be checked until one
+can be played.
 
-- ffmpeg adapter: per-scene segment, `zoompan`, transitions, concat
+- ffmpeg adapter: trim a clip span, crop/fit to canvas, speed change, concat
+- photos: Ken Burns motion; clips: straight playback within the trim
 - ASS subtitle generation for word-level kinetic captions
-- audio variants: one video pass, separate muxes for `full` / `narration_only` / `silent`
+- audio variants: one video pass, separate muxes for full / narration_only / silent
 - safe-area-aware overlay placement
-- procedural image provider: gradient + typography
 - filesystem store; content-addressed assets
 - fingerprint-based segment cache
-- `genvai render <project>`
 
-*Done when:* a committed sample timeline renders to a correct MP4 on a clean clone,
-and re-rendering after changing one scene re-encodes exactly one segment.
+*Done when:* a committed sample timeline mixing photos and trimmed clips renders to a
+correct MP4 on a clean clone, and changing one scene re-encodes exactly one segment.
 
-## M2 - The planner
+## M2 - Ingest and analysis
 
-- Ollama adapter with schema-constrained structured output
-- intent -> storyboard -> `Timeline`, with validate-and-retry on malformed output
-- prompt/response logging to `log/llm.jsonl`
-- `genvai create "<intent>"`
+The slow phase, cached forever by content hash.
 
-*Risk:* small local models produce invalid JSON. Mitigation: constrained decoding via
-Ollama's `format` parameter, a compact schema, and bounded retry that feeds the
-validation error back. If a 7B model proves unreliable, the fallback is a two-step
-prompt - prose storyboard first, then JSON conversion - which is far easier for
-small models than one-shot structured output.
+- probe: dimensions, duration, fps, EXIF capture time and rotation
+- measure: sharpness, exposure, motion, shake, face area
+- spans: find the good seconds inside each clip
+- dedup: perceptual hashing groups near-identical takes
+- `genvai add <project> <files...>`
 
-## M3 - Conversational editing
+All classical CV on the CPU. No model, no GPU, no optional extra.
 
-The milestone that makes it the product described in the vision.
+*Risk:* span detection is the part that decides whether the output is good. A first cut
+can be crude - prefer stable, sharp, well-exposed stretches away from the clip's start
+and end, since phone clips are shakiest when a thumb is on the button.
 
-- `EditOp` extraction from free text
-- atomic validate-then-apply
-- human-readable diff before re-render
-- version restore
-- `genvai edit <project> "<request>"` / `genvai restore <project> <version>`
+## M3 - Selection and assembly
 
-*Done when:* "make scene 2 longer and drop the music" applies correctly, shows the
-diff, re-encodes only the affected segment, and is reversible.
+- `shortlist`: pure scored filter, no model
+- `assemble`: LLM orders the shortlist, sets trims, roles and on-screen text
+- chronological fallback when Ollama is unavailable, so the tool still works
+- `genvai reel <project> --duration 30`
 
-## M4 - Diffusion visuals
+*Done when:* a real camera roll produces a watchable reel without hand-editing.
 
-- `diffusers` adapter, SD-Turbo default (1-4 steps, fast, fits 4 GB)
-- attention slicing + sequential CPU offload; VAE slicing for the 4 GB ceiling
-- explicit LLM unload before load - the phase boundary from the architecture doc
-- seed recorded per image for reproducibility
+## M4 - Conversational editing
 
-*Risk:* 4 GB is genuinely tight. If SD-Turbo at 768px OOMs, drop to 512px and
-upscale with ffmpeg `lanczos`. Procedural fallback stays available throughout.
+- edit-op extraction from free text, including the clip ops
+- atomic validate-then-apply, human-readable diff, version restore
+- `genvai edit <project> "drop the third clip and slow the sunset one down"`
 
-## M5 - Audio
+## M5 - Music and beat
 
-- Piper TTS per scene; timing reconciled against planned scene duration
-  (scenes stretch to fit narration rather than truncating it)
-- music query -> candidates -> **confirm** -> download -> licence recorded
-- sidechain ducking under narration
+- music query -> candidates -> confirm -> download -> licence recorded
+- beat detection on the chosen track
+- snap cuts to the grid
 
-## M6 - Photo mode
+## M6 - Auto-reframe
 
-- ingest, hash, EXIF orientation, aspect-fit to canvas
-- LLM orders them and assigns motion from actual image content
-- requires a vision model, or captioning at ingest so the text LLM can reason about them
+Phone clips are often landscape; reels are vertical. Centre-cropping decapitates people.
+Face/saliency-aware crop paths, smoothed over time so the frame does not jitter.
 
-## M7 - Footage mode
+## M7 - Idea mode
 
-- faster-whisper transcript with word timings
-- LLM highlight selection -> cut list
-- auto-reframe to 9:16, face-aware where possible
-- one long video -> several shorts
+Parked, not cancelled. Generated stills and narration for title cards and gaps where no
+footage exists. See the backlog for why it is not the headline.
 
 ## Known open questions
 
@@ -105,6 +96,8 @@ upscale with ffmpeg `lanczos`. Procedural fallback stays available throughout.
    call, not a technical one, so it is recorded rather than assumed
    ([07-backlog.md](07-backlog.md) B5).
 2. **Small-model JSON reliability** - decides whether M2 needs the two-step fallback.
-3. **Scene/narration timing** - stretch the scene, speed the speech, or trim the text? Leaning stretch-the-scene; it is the least destructive.
-4. **Music source** - which CC library to integrate first, and whether to ship a small bundled set so M5 works fully offline.
+3. **Beat snapping versus span integrity** - forcing a cut onto a beat can clip the
+   good moment it was trimmed to. Which wins is a judgement call that needs footage.
+4. **Music source** - which CC library to integrate first, and whether to ship a small
+   bundled set so M5 works fully offline.
 5. **Preview loop** - is a proxy render fast enough for iteration, or is a frame-accurate still preview needed for the edit loop to feel conversational?

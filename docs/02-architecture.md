@@ -31,6 +31,36 @@ Ollama, or torch - only about protocols.
 
 Dependencies point **inward**. The core never imports an adapter.
 
+## Data flow - camera roll to reel
+
+```
+  photos + clips dropped in
+        |
+        v
+  [1] INGEST          per file, once ever, keyed by content hash
+        |               probe: dimensions, duration, capture time, rotation
+        |               measure: sharpness, exposure, motion, shake, faces
+        |               spans: where the good seconds are inside each clip
+        |               dedup: perceptual hash groups the near-identical takes
+        v             -> media.json
+  [2] SHORTLIST       pure, deterministic, no model
+        |               drop unusable, keep best of each dedup group,
+        |               rank by span score against the target duration
+        v
+  [3] ASSEMBLE        LLM orders the shortlist and picks per-scene trims,
+        |               scene roles and on-screen text -> Timeline v1
+        v
+  [4] BEAT FIT        nudge cuts onto the music grid
+        |
+        v
+  [5] RENDER          trim, crop, concat, mix -> MP4
+```
+
+The split at steps 2 and 3 is the important one. Measurement is objective and cheap,
+so it runs first and without a model. The LLM is only asked what it is actually good
+at - what order tells a story, what the opening shot should be, what the text says.
+That keeps the edit reproducible and the context small.
+
 ## Data flow - creation
 
 ```
@@ -113,7 +143,10 @@ is readable in a single sitting.
 | `ImageProvider` | prompt -> still image | `diffusers` local SD | procedural card |
 | `SpeechProvider` | text -> narration audio | Piper (CPU) | silence |
 | `MusicProvider` | describe -> candidates; fetch on approval | local library | no music |
-| `TranscriptProvider` | audio -> timed transcript | faster-whisper | not required until footage mode |
+| `MediaAnalyzer` | measure a photo/clip, find good spans, group duplicates | OpenCV (CPU) | none (required for camera roll) |
+| `ContentTagger` | what is in a shot, for intent matching | CLIP | quality + chronology only |
+| `BeatDetector` | music -> beat grid | onset detection (CPU) | cuts land on scene boundaries |
+| `TranscriptProvider` | audio -> timed transcript | faster-whisper | only when clip speech is captioned |
 | `RendererPort` | timeline -> video file | ffmpeg | none (required) |
 | `ProjectStore` | load/save project + versions | filesystem | none (required) |
 
@@ -149,8 +182,10 @@ projects/<project-id>/
   timelines/
     v1.json
     v2.json               # every version kept; restore = point at an older file
+  media.json              # ingest results: quality, spans, tags, dedup groups
   assets/
     images/<sha256>.png
+    clips/<sha256>.mp4
     audio/<sha256>.wav
     music/<sha256>.mp3    # + .license.json alongside
   cache/
@@ -177,8 +212,11 @@ src/genvai/
   ops.py            PURE  EditOp union + apply() : Timeline -> Timeline
   fingerprint.py    PURE  content hashing for incremental render
   ports.py          Protocols - the whole system boundary in one file
+  media.py          PURE  MediaItem, ClipQuality, Span, MediaLibrary
   pipeline/
-    plan.py         intent -> Timeline
+    ingest.py       camera roll -> analysed media library
+    select.py       library + intent -> Timeline (shortlist, assemble, beat fit)
+    plan.py         intent -> Timeline (idea mode)
     resolve.py      fill unresolved asset slots
     render.py       Timeline -> MP4
     edit.py         request -> EditOp[] -> new Timeline

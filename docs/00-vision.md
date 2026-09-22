@@ -8,41 +8,44 @@ then keeps refining it through conversation.
 Not "a timeline UI with AI features bolted on". The user never touches a timeline.
 They describe what they want, watch the result, and say what to change.
 
-## Three input modes
+## What it is for
 
-Named after what the user already has. The system handles all three with one pipeline.
+**You have a camera roll. You want a reel.**
 
-| Mode | You have | The system does |
-| --- | --- | --- |
-| **Idea mode** | nothing but a description | writes, generates and renders everything |
-| **Photo mode** | images | orders them, times them, adds text and music |
-| **Footage mode** | a long recording | transcribes, finds the good parts, cuts clips |
+Forty clips and photos from a weekend, a shoot, an event. Fifteen of them are worth
+using. Each clip is fifteen seconds of which two are good. Finding those two seconds,
+forty times over, then sequencing them to music, is the tedious part of making a reel -
+and it is the part that automates well.
 
-### Idea mode - you have nothing but an idea
+| Mode | You have | The system does | Status |
+| --- | --- | --- | --- |
+| **Camera roll mode** | photos and short clips | picks the keepers, trims each to its good moment, sequences, cuts to the beat, captions | **the product** |
+| **Idea mode** | nothing but a description | generates visuals and narration from a prompt | parked - see backlog |
 
-> "Make me a 30-second vertical video explaining why compound interest matters,
-> calm tone, soft piano."
+### Camera roll mode
 
-Nothing is provided. The system writes the script, generates every visual,
-synthesises narration, proposes music, and renders.
+> "Here are 40 clips and photos from the trip. Make me a 30-second reel."
 
-### Photo mode - you have images
+The system reads every file, measures it, throws out the blurry and the duplicated,
+finds the good seconds inside each clip, orders them into something with a shape, cuts
+on the beat, and burns captions.
 
-> "Here are 12 photos from the trip. Make a 45-second reel."
+Photos and clips are the same problem and go through the same pipeline. A photo is
+just a clip with no span to choose.
 
-The system orders them, decides timing and motion, writes on-screen text,
-and proposes music if none was given.
+### Why this and not text-to-video
 
-### Footage mode - you have a recording
+Generating video from a prompt is the crowded end of the market, and on a 4 GB GPU it
+is also the end where this loses. Camera-roll editing inverts that: the footage is
+already real, so image fidelity stops being a constraint, and the work that remains -
+selection, trimming, pacing - is genuinely tedious by hand and genuinely automatable.
 
-> "Here is a 40-minute talk. Cut it into three shorts."
-
-The system transcribes, finds highlights, cuts, reframes, captions.
-*(Later milestone - see roadmap.)*
+Idea mode is not deleted. It stays useful for title cards and for filling a gap where
+no footage exists. It is simply not the pitch.
 
 ### The mode that matters most: refinement
 
-Every mode is followed by:
+The edit is never finished in one pass:
 
 > "The second scene is too fast, and use a different song."
 

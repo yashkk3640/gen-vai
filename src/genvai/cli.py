@@ -66,14 +66,46 @@ def doctor() -> None:
 
 
 @app.command()
-def create(
-    intent: str = typer.Argument(..., help="What the video should be."),
-    image: list[Path] = typer.Option([], "--image", "-i", help="Images to build around."),
+def add(
+    project: str = typer.Argument(..., help="Project id, or a new name to create one."),
+    files: list[Path] = typer.Argument(..., help="Photos and clips. Folders are walked."),
+) -> None:
+    """Import a camera roll and analyse it.
+
+    The slow step, cached by content hash - re-adding the same files is free.
+    """
+    _not_yet("add", "M2")
+
+
+@app.command()
+def reel(
+    project: str = typer.Argument(..., help="Project id."),
+    duration: float = typer.Option(30.0, "--duration", "-d", help="Target length in seconds."),
+    intent: str = typer.Option("", "--intent", help="Steer it: 'focus on the food'."),
     aspect: str = typer.Option("9:16", "--aspect", help="9:16, 16:9 or 1:1."),
     seed: int = typer.Option(0, "--seed", help="0 picks a random seed and records it."),
 ) -> None:
-    """Create a project and render a first cut from an intent."""
-    _not_yet("create", "M2")
+    """Build a reel from the project's media."""
+    _not_yet("reel", "M3")
+
+
+@app.command()
+def media(
+    project: str = typer.Argument(..., help="Project id."),
+    unused: bool = typer.Option(False, "--unused", help="Only what did not make the cut."),
+) -> None:
+    """List analysed media with quality scores and the spans that were found."""
+    _not_yet("media", "M2")
+
+
+@app.command()
+def create(
+    intent: str = typer.Argument(..., help="What the video should be."),
+    aspect: str = typer.Option("9:16", "--aspect", help="9:16, 16:9 or 1:1."),
+    seed: int = typer.Option(0, "--seed", help="0 picks a random seed and records it."),
+) -> None:
+    """Idea mode: generate from a description, no footage. Parked - see roadmap."""
+    _not_yet("create", "M7")
 
 
 @app.command()
@@ -83,7 +115,7 @@ def edit(
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip the diff confirmation."),
 ) -> None:
     """Apply a change to an existing project and re-render what moved."""
-    _not_yet("edit", "M3")
+    _not_yet("edit", "M4")
 
 
 @app.command()
@@ -108,7 +140,7 @@ def restore(
     version: int = typer.Argument(..., help="Version to restore."),
 ) -> None:
     """Restore an earlier timeline version. Nothing is ever lost, so this always works."""
-    _not_yet("restore", "M3")
+    _not_yet("restore", "M4")
 
 
 @app.command()

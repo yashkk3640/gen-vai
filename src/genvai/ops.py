@@ -16,6 +16,7 @@ from genvai.timeline import (
     Canvas,
     CaptionMode,
     Export,
+    Fit,
     Frozen,
     Motion,
     MusicQuery,
@@ -61,6 +62,68 @@ class SetVisualPrompt(Frozen):
     prompt: str
     negative_prompt: str | None = None
     force: bool = False
+
+
+class SetClipSpan(Frozen):
+    """Retrim which part of a source clip is used - "start that one a bit later".
+
+    Adjusts `Scene.duration` to match, since the two must stay consistent.
+    """
+
+    op: Literal["set_clip_span"] = "set_clip_span"
+    scene_id: str
+    source_start: float = Field(ge=0.0)
+    source_end: float = Field(gt=0.0)
+
+
+class NudgeClipSpan(Frozen):
+    """Shift a trim without changing its length - "show a bit more before that".
+
+    Separate from SetClipSpan because it is what users actually ask for, and it
+    leaves scene duration and therefore the beat alignment untouched.
+    """
+
+    op: Literal["nudge_clip_span"] = "nudge_clip_span"
+    scene_id: str
+    seconds: float = Field(description="Negative moves earlier in the source.")
+
+
+class SetClipSpeed(Frozen):
+    """Slow-motion or speed-up. Rescales scene duration accordingly."""
+
+    op: Literal["set_clip_speed"] = "set_clip_speed"
+    scene_id: str
+    speed: float = Field(gt=0.1, le=10.0)
+
+
+class SetCrop(Frozen):
+    """Reframe a photo or clip inside the canvas - the 16:9 to 9:16 problem."""
+
+    op: Literal["set_crop"] = "set_crop"
+    scene_id: str
+    crop: tuple[float, float, float, float] | None = Field(
+        default=None, description="None restores auto-fit."
+    )
+    fit: Fit | None = None
+
+
+class SetClipMuted(Frozen):
+    """Unmute a clip whose own audio is the point."""
+
+    op: Literal["set_clip_muted"] = "set_clip_muted"
+    scene_id: str
+    mute: bool
+
+
+class ReplaceSource(Frozen):
+    """Swap which media a scene uses - "use the other take of that".
+
+    Keeps timing and treatment, changes only the source.
+    """
+
+    op: Literal["replace_source"] = "replace_source"
+    scene_id: str
+    asset_id: str
 
 
 class SetMotion(Frozen):
@@ -186,6 +249,12 @@ EditOp = Annotated[
     SetSceneDuration
     | ScaleAllDurations
     | SetVisualPrompt
+    | SetClipSpan
+    | NudgeClipSpan
+    | SetClipSpeed
+    | SetCrop
+    | SetClipMuted
+    | ReplaceSource
     | SetMotion
     | SetNarration
     | SetOverlayText

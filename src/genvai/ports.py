@@ -13,9 +13,11 @@ from typing import Protocol, TypeVar, runtime_checkable
 
 from pydantic import BaseModel
 
+from genvai.media import MediaItem, MediaLibrary
 from genvai.timeline import (
     Asset,
     AudioVariant,
+    BeatMap,
     MusicCandidate,
     MusicQuery,
     Project,
@@ -127,8 +129,69 @@ class MusicProvider(Protocol):
 
 
 @runtime_checkable
+class MediaAnalyzer(Protocol):
+    """Measure a photo or clip: quality, good spans, duplicates.
+
+    The workhorse of camera-roll editing, and almost entirely classical CV - sharpness,
+    exposure, motion, shake, perceptual hashing. Runs on CPU, needs no model, and is
+    the reason selection works on a 4 GB machine.
+    """
+
+    def is_available(self) -> bool: ...
+
+    def analyse(self, media: Path, item: MediaItem) -> MediaItem:
+        """Return the item with `quality` and `spans` filled in.
+
+        Pure with respect to the library: it observes one file and returns a new
+        item, so analysis can be parallelised and cached per content hash.
+        """
+        ...
+
+    def duplicate_groups(self, items: tuple[MediaItem, ...]) -> dict[str, str]:
+        """Map asset_id -> group id for near-duplicates, via perceptual hashing.
+
+        Only ids that belong to a group of two or more appear in the result.
+        """
+        ...
+
+
+@runtime_checkable
+class ContentTagger(Protocol):
+    """Say what is in a photo or clip, so intent can be matched against it.
+
+    Needed only for requests like "focus on the food". CLIP-style embedding
+    comparison is enough and is cheap; a captioning model is better and is not.
+    Optional - without it, selection falls back to quality and chronology.
+    """
+
+    def is_available(self) -> bool: ...
+
+    def tag(self, media: Path, *, vocabulary: tuple[str, ...] = ()) -> tuple[str, ...]: ...
+
+    def caption(self, media: Path) -> str | None: ...
+
+
+@runtime_checkable
+class BeatDetector(Protocol):
+    """Find the beat grid of a music track.
+
+    Onset detection, not a model. Cutting on the beat is most of what separates a
+    reel that feels edited from one that feels assembled.
+    """
+
+    def is_available(self) -> bool: ...
+
+    def detect(self, audio: Path) -> BeatMap: ...
+
+
+@runtime_checkable
 class TranscriptProvider(Protocol):
-    """Audio to timed transcript. Needed only for footage mode (existing footage)."""
+    """Audio to timed transcript.
+
+    Only needed when a clip's own speech matters - a piece to camera that should be
+    captioned. Not required for the ordinary camera-roll path, where clip audio is
+    muted and the bed is music.
+    """
 
     def is_available(self) -> bool: ...
 
@@ -222,5 +285,15 @@ class ProjectStore(Protocol):
         ...
 
     def asset_path(self, project_id: str, asset_id: str) -> Path: ...
+
+    def save_media(self, project_id: str, library: MediaLibrary) -> None:
+        """Persist ingest results to `media.json`.
+
+        Written once per ingest and read on every re-selection, so that changing
+        your mind about the edit never re-analyses the footage.
+        """
+        ...
+
+    def load_media(self, project_id: str) -> MediaLibrary: ...
 
     def project_dir(self, project_id: str) -> Path: ...

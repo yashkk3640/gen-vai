@@ -6,8 +6,10 @@ import pytest
 from pydantic import ValidationError
 
 from genvai.timeline import (
+    AssetVisual,
     Canvas,
     Captions,
+    ClipVisual,
     Export,
     GeneratedVisual,
     Music,
@@ -171,3 +173,49 @@ def test_style_suffix_defaults_to_empty() -> None:
 def test_canvas_orientation() -> None:
     assert Canvas().is_vertical
     assert not Canvas(width=1920, height=1080).is_vertical
+
+
+# ------------------------------------------------------------- camera roll contract
+
+
+def test_clip_span_is_the_edit() -> None:
+    clip = ClipVisual(asset_id="v1", source_start=3.0, source_end=5.4)
+    assert clip.source_duration == pytest.approx(2.4)
+    assert clip.output_duration == pytest.approx(2.4)
+
+
+def test_slow_motion_stretches_output() -> None:
+    clip = ClipVisual(asset_id="v", source_end=2.0, speed=0.5)
+    assert clip.output_duration == pytest.approx(4.0)
+
+
+def test_speed_up_shortens_output() -> None:
+    clip = ClipVisual(asset_id="v", source_end=6.0, speed=2.0)
+    assert clip.output_duration == pytest.approx(3.0)
+
+
+def test_inverted_span_has_no_duration() -> None:
+    """A malformed trim yields zero, not a negative that would corrupt the timeline."""
+    clip = ClipVisual(asset_id="v", source_start=5.0, source_end=2.0)
+    assert clip.source_duration == 0.0
+
+
+def test_clip_audio_is_muted_by_default() -> None:
+    """Camera-roll audio is usually wind and chatter."""
+    assert ClipVisual(asset_id="v", source_end=2.0).mute is True
+
+
+def test_clips_and_photos_share_one_timeline() -> None:
+    timeline = Timeline(
+        intent="trip reel",
+        scenes=(
+            Scene(id="s1", duration=2.4, visual=ClipVisual(asset_id="v1", source_end=2.4)),
+            Scene(id="s2", duration=2.0, visual=AssetVisual(asset_id="p1")),
+        ),
+    )
+    assert Timeline.model_validate_json(timeline.model_dump_json()) == timeline
+    assert timeline.duration == pytest.approx(4.4)
+
+
+def test_cuts_snap_to_beat_by_default() -> None:
+    assert Export().snap_cuts_to_beat is True

@@ -11,7 +11,7 @@ are already in `timeline.py` and listed at the bottom for reference.
 - [Character and scene consistency](#character-and-scene-consistency)
 - [Motion that does not read as a slideshow](#motion-that-does-not-read-as-a-slideshow)
 - [Trending audio workflow](#trending-audio-workflow)
-- [Should footage mode be built before idea mode?](#should-footage-mode-be-built-before-idea-mode)
+- [Idea mode: generated visuals from a prompt](#idea-mode-generated-visuals-from-a-prompt)
 - [Retention feedback loop](#retention-feedback-loop)
 - [Auto-reframe and face tracking](#auto-reframe-and-face-tracking)
 
@@ -88,23 +88,24 @@ sound manually, accept that cut timing will not match the track.
 
 ---
 
-## Should footage mode be built before idea mode?
+## Idea mode: generated visuals from a prompt
 
-**A prioritisation question, not a technical one.**
+**Deprioritised on purpose.**
 
-For competitive short-form output on this hardware, editing existing footage beats
-generating stills. The source material is already real, so the image fidelity and
-character consistency problems above stop mattering
-entirely, and the LLM is left doing what it is genuinely good at: choosing moments,
-pacing, and writing captions.
+Generating a video from nothing but a description was the original headline. It is now
+M7, behind the whole camera-roll path, for three reasons:
 
-footage mode is currently M7, last. If short-form output is the actual goal rather than
-text-to-video as such, it belongs at M2, right after the render path.
+1. It is the most crowded segment in the market, and the incumbents have better image
+   models, better voices and a stock library.
+2. On 4 GB it is where this loses hardest - see the image fidelity ceiling above.
+3. Camera-roll editing has none of those problems, because the footage is already real.
 
-Deliberately not reordered yet - that is a product call, and the roadmap notes it as
-open rather than assuming an answer.
+What survives and stays worth building: generated **title cards** and gap-fillers,
+where a stylised still among real footage is a deliberate choice rather than a
+compromise. The schema already supports it - `GeneratedVisual` sits in the same union
+as `ClipVisual`, so a generated shot can be dropped into a real timeline at any point.
 
----
+What is parked: narration-driven videos made entirely of generated stills.
 
 ## Retention feedback loop
 
