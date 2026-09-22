@@ -3,6 +3,7 @@
 import numpy as np
 
 from genvai.analysis import (
+    DUPLICATE_THRESHOLD,
     group_duplicates,
     hamming,
     perceptual_hash,
@@ -38,22 +39,30 @@ def test_identical_frames_hash_identically() -> None:
 def test_re_encoding_does_not_change_the_hash_much() -> None:
     """Two exports of the same photo must land in one group."""
     frame = _scene(2)
-    assert hamming(perceptual_hash(frame), perceptual_hash(_jpeg_like(frame))) <= 6
+    distance = hamming(perceptual_hash(frame), perceptual_hash(_jpeg_like(frame)))
+    assert distance < DUPLICATE_THRESHOLD
 
 
-def test_brightness_shift_does_not_change_the_hash() -> None:
-    """dHash records relative brightness, so exposure changes should not matter."""
+def test_brightness_shift_barely_changes_the_hash() -> None:  # noqa: D401
+    """Relative brightness is what is recorded, so exposure should not matter much.
+
+    Not exactly zero: lifting the blacks also flattens contrast, which pushes a few
+    borderline comparisons inside the tie tolerance. A handful of bits out of 128 is
+    far inside the duplicate threshold.
+    """
     frame = _scene(3)
     brighter = np.clip(frame * 0.7 + 60, 0, 255)
-    assert hamming(perceptual_hash(frame), perceptual_hash(brighter)) <= 2
+    assert hamming(perceptual_hash(frame), perceptual_hash(brighter)) < DUPLICATE_THRESHOLD
 
 
 def test_different_scenes_hash_differently() -> None:
-    assert hamming(perceptual_hash(_scene(10)), perceptual_hash(_scene(99))) > 12
+    distance = hamming(perceptual_hash(_scene(10)), perceptual_hash(_scene(99)))
+    assert distance > DUPLICATE_THRESHOLD
 
 
-def test_hash_is_64_bits() -> None:
-    assert 0 <= perceptual_hash(_scene(4)) < 2**64
+def test_hash_is_256_bits() -> None:
+    """64 comparisons on each axis, two bits each for the three-state result."""
+    assert 0 <= perceptual_hash(_scene(4)) < 2**256
 
 
 def test_empty_frame_hashes_to_zero() -> None:
@@ -132,3 +141,31 @@ def test_greyscale_conversion_feeds_hashing() -> None:
     colour = RNG.integers(0, 255, (64, 64, 3), dtype=np.uint8)
     frame = to_greyscale(colour)
     assert perceptual_hash(frame) == perceptual_hash(to_greyscale(colour))
+
+
+def test_horizontally_uniform_regions_hash_stably() -> None:
+    """The bug this hash was rewritten for.
+
+    A scene of horizontal bands - sky over a horizon, a wall, letterbox bars - has
+    nothing to say under horizontal comparison, so a plain dHash decides those bits by
+    floating-point noise and two encodes of one photo come out unrelated.
+    """
+    bands = np.repeat(np.linspace(20, 230, 16), 8).reshape(-1, 1) * np.ones((1, 128))
+    assert hamming(perceptual_hash(bands), perceptual_hash(_jpeg_like(bands, 2.0))) < 8
+
+
+def test_flat_and_banded_images_are_still_distinguishable() -> None:
+    """Collapsing ties must not make every low-contrast image identical.
+
+    Caught a real collision: with a two-state comparison, "flat" and "steadily getting
+    brighter downward" both produced an all-zero hash.
+    """
+    flat = np.full((128, 128), 128.0)
+    bands = np.repeat(np.linspace(20, 230, 16), 8).reshape(-1, 1) * np.ones((1, 128))
+    assert hamming(perceptual_hash(flat), perceptual_hash(bands)) > DUPLICATE_THRESHOLD
+
+
+def test_direction_of_a_gradient_matters() -> None:
+    """Light-to-dark is not the same picture as dark-to-light."""
+    ascending = np.repeat(np.linspace(20, 230, 16), 8).reshape(-1, 1) * np.ones((1, 128))
+    assert hamming(perceptual_hash(ascending), perceptual_hash(ascending[::-1].copy())) > 64

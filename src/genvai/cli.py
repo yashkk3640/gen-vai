@@ -11,13 +11,16 @@ from pathlib import Path
 
 import typer
 from rich.console import Console
+from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 
 from genvai import __version__
-from genvai.adapters.ffmpeg import FFmpegRenderer
+from genvai.adapters.analyzer import FrameAnalyzer
+from genvai.adapters.ffmpeg import FFmpegRenderer, resolve_ffmpeg
 from genvai.adapters.fs_store import FilesystemStore
 from genvai.config import load_settings
 from genvai.errors import GenvaiError, RenderError
+from genvai.pipeline.ingest import ingest, summarise
 from genvai.pipeline.render import plan_render
 from genvai.pipeline.render import render as render_timeline
 
@@ -79,7 +82,29 @@ def add(
 
     The slow step, cached by content hash - re-adding the same files is free.
     """
-    _not_yet("add", "M2")
+    settings = load_settings()
+    store = FilesystemStore(settings.projects_dir)
+    store.create(f"reel from {files[0].name}", project)
+    ffmpeg = resolve_ffmpeg()
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TextColumn("{task.completed}/{task.total}"),
+        console=console,
+    ) as bar:
+        task = bar.add_task("analysing", total=None)
+
+        def tick(name: str, index: int, total: int) -> None:
+            bar.update(task, total=total, completed=index, description=f"analysing {name}")
+
+        library = ingest(
+            tuple(files), project, FrameAnalyzer(ffmpeg), store, ffmpeg, on_progress=tick
+        )
+
+    console.print(f"[bold]{project}[/bold]  {summarise(library.items)}")
+    console.print("[dim]See what was found with 'genvai media " + project + "'.[/dim]")
 
 
 @app.command()
@@ -100,7 +125,39 @@ def media(
     unused: bool = typer.Option(False, "--unused", help="Only what did not make the cut."),
 ) -> None:
     """List analysed media with quality scores and the spans that were found."""
-    _not_yet("media", "M2")
+    settings = load_settings()
+    store = FilesystemStore(settings.projects_dir)
+    library = store.load_media(project)
+    if not library.items:
+        console.print(f"[dim]Nothing imported yet. Try 'genvai add {project} <files...>'.[/dim]")
+        return
+
+    keepers = {i.asset_id for i in library.deduplicated()}
+    shown = [i for i in library.items if not unused or i.asset_id not in keepers]
+
+    table = Table(show_header=True, header_style="bold")
+    table.add_column("File", overflow="fold")
+    table.add_column("Kind")
+    table.add_column("Sharp", justify="right")
+    table.add_column("Expo", justify="right")
+    table.add_column("Shake", justify="right")
+    table.add_column("Best moment", overflow="fold")
+    for item in shown:
+        quality = item.quality
+        span = item.best_span
+        moment = f"{span.start:.1f}-{span.end:.1f}s  {span.reason}" if span else "-"
+        if item.asset_id not in keepers:
+            moment = "[dim]duplicate[/dim]"
+        table.add_row(
+            item.source_name,
+            item.kind,
+            f"{quality.sharpness:.2f}" if quality else "-",
+            f"{quality.exposure:.2f}" if quality else "-",
+            f"{quality.shake:.2f}" if quality else "-",
+            moment,
+        )
+    console.print(table)
+    console.print(f"[dim]{summarise(library.items)}[/dim]")
 
 
 @app.command()

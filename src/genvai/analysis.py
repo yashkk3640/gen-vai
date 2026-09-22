@@ -268,32 +268,65 @@ def _clamp(value: float) -> float:
 # ---------------------------------------------------------------------- duplicates
 
 HASH_SIZE = 8
-"""Produces a 64-bit fingerprint: 8 rows of 8 horizontal comparisons."""
+"""Thumbnail grid: 8x8 comparisons on each of two axes."""
 
-DUPLICATE_THRESHOLD = 10
-"""Hamming distance below which two images are treated as the same shot.
+TIE_TOLERANCE = 1.5
+"""Brightness difference, 0-255, below which two cells count as equal.
 
-Tuned loose on purpose. Five burst frames of the same scene differ by a few bits;
-a re-framed second take of the same subject differs by rather more. Missing a
-duplicate only costs a near-repeat in the cut, while falsely merging two different
-moments silently loses one of them - so the threshold errs toward merging less.
+Load-bearing. A plain `a > b` on a uniform region - sky, a wall, a letterbox bar - is
+decided by floating-point noise, so two encodes of the same photo produce unrelated bits
+there. Real photographs are full of such regions.
+"""
+
+DUPLICATE_THRESHOLD = 40
+"""Hamming distance below which two images are the same shot, out of 256 bits.
+
+Tuned loose on purpose. Missing a duplicate only costs a near-repeat in the cut, while
+falsely merging two moments silently loses one - so it errs toward merging less.
 """
 
 
 def perceptual_hash(frame: Frame) -> int:
-    """A dHash: 64 bits describing the frame's coarse structure.
+    """A 256-bit fingerprint of the frame's coarse structure.
 
-    Each bit asks whether one cell of a tiny greyscale thumbnail is brighter than the
-    cell to its right. Because it records *relative* brightness, it is unbothered by
-    exposure shifts, resizing and compression - two exports of the same photo at
-    different quality hash identically, which is exactly what a camera roll needs.
+    Each neighbouring pair of cells in a tiny greyscale thumbnail is compared, and the
+    result recorded as one of three states - brighter, darker, or too close to call.
+    Because it records *relative* brightness, it shrugs off exposure shifts, resizing and
+    re-encoding: two exports of the same photo hash identically.
+
+    Three details, each fixing a way the textbook dHash goes wrong on real photographs:
+
+    - **Both axes.** A scene of horizontal bands has nothing to say horizontally. With
+      only the horizontal half, its fingerprint would be noise.
+    - **A tie state.** Without it, a flat region's bits are decided by rounding error and
+      flip between encodes of one image.
+    - **Two bits per comparison.** Collapsing ties to a single `False` makes "flat" and
+      "steadily getting brighter" produce the same all-zero hash, silently merging two
+      quite different pictures.
     """
-    thumbnail = _downsample(frame, HASH_SIZE + 1, HASH_SIZE)
+    thumbnail = _downsample(frame, HASH_SIZE + 1, HASH_SIZE + 1)
     if thumbnail.size == 0:
         return 0
-    bits = thumbnail[:, :-1] > thumbnail[:, 1:]
+    horizontal = _compare(thumbnail[:HASH_SIZE, :-1], thumbnail[:HASH_SIZE, 1:])
+    vertical = _compare(thumbnail[:-1, :HASH_SIZE], thumbnail[1:, :HASH_SIZE])
+    return _pack(np.concatenate([horizontal, vertical]))
+
+
+def _compare(left: Frame, right: Frame) -> NDArray[np.bool_]:
+    """Three-state comparison, flattened to two bits per cell pair.
+
+    `(brighter, darker)` - and `(False, False)` for a tie, which is a state of its own
+    rather than a synonym for "darker".
+    """
+    difference = left - right
+    return np.stack(
+        [(difference > TIE_TOLERANCE).flatten(), (difference < -TIE_TOLERANCE).flatten()]
+    ).flatten()
+
+
+def _pack(bits: NDArray[np.bool_]) -> int:
     value = 0
-    for bit in bits.flatten():
+    for bit in bits:
         value = (value << 1) | int(bit)
     return value
 

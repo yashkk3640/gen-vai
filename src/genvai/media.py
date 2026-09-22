@@ -102,6 +102,13 @@ class MediaItem(Frozen):
         ),
     )
     caption: str | None = None
+    fingerprint: int | None = Field(
+        default=None,
+        description=(
+            "Perceptual hash of a representative frame. Kept on the item so duplicate "
+            "grouping can be redone without re-reading the files."
+        ),
+    )
     dedup_group: str | None = Field(
         default=None,
         description=(
