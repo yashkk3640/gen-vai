@@ -1,75 +1,57 @@
 # gen-vai
 
-**You have a camera roll. You want a reel.**
+**Turn a camera roll into a reel. Locally.**
 
-Forty clips and photos from a weekend. Fifteen are worth using, each clip has about two
-good seconds in it, and finding those two seconds forty times over is the tedious part.
-That is the part this automates.
+Point it at your photos and short clips. It picks the good ones, trims each to its best
+moment, sequences them, and renders a vertical video. Then you say what to change and it
+patches the result instead of starting over.
+
+Nothing is uploaded. Ollama makes the editorial calls, ffmpeg does the render.
+
+## Install
+
+Needs [uv](https://docs.astral.sh/uv/). It brings its own Python, and ffmpeg ships with
+the dependencies — nothing else to install.
 
 ```bash
-genvai add trip ~/Pictures/trip/          # import and analyse
-genvai reel trip --duration 30            # pick, trim, sequence, caption
-genvai edit trip "drop the third clip and slow the sunset one down"
+git clone <repo> gen-vai && cd gen-vai
+uv sync
+uv run genvai doctor
 ```
 
-It reads every file, measures it, throws out the blurry and the duplicated, finds the
-good seconds inside each clip, orders them into something with a shape, cuts on the
-beat, and burns captions. Then you tell it what to change and it patches the result
-instead of starting over.
+`doctor` reports what your machine has. Anything missing degrades gracefully rather than
+breaking. For the LLM features, install [Ollama](https://ollama.com) and
+`ollama pull qwen2.5:7b-instruct`.
 
-Everything runs locally - Ollama for the editorial judgement, OpenCV for the analysis,
-ffmpeg for the render. Your footage never leaves the machine. The only network call is
-fetching a music track, and that never happens without your explicit confirmation.
+## Use
 
-**Generating video from a text prompt** is also in here, but it is deliberately not the
-headline: it is the crowded end of the market and the end where a 4 GB GPU loses.
-Camera-roll editing inverts that - the footage is already real, so image quality stops
-being a constraint. See [docs/00-vision.md](docs/00-vision.md).
+```bash
+genvai add trip ~/Pictures/trip/        # import and analyse a camera roll
+genvai reel trip --duration 30          # pick, trim, sequence, caption
+genvai edit trip "drop the third clip"  # change it
+genvai render trip                      # re-render (only what changed)
+```
+
+| Command | What it does | Ready |
+| --- | --- | --- |
+| `doctor` | What this machine can do | yes |
+| `list` | Your projects | yes |
+| `render` | Timeline → MP4. `--preview` for a fast proxy, `--dry-run` to see the work | yes |
+| `add` | Import and analyse media | M2 |
+| `media` | Show what was found, with scores | M2 |
+| `reel` | Build a reel | M3 |
+| `edit` | Change it in plain English | M4 |
+| `music` | Suggest and approve a track | M5 |
+
+A project is a plain folder under `projects/`. Open it and you can see every asset, every
+version of the edit, and every render. Copy it to another machine and it still works.
 
 ## Status
 
-**M1 complete - timelines render.** The ffmpeg adapter, filesystem store and
-incremental segment cache all work against real media; `genvai render` produces MP4s.
-Ingest, selection and the LLM are next. See [docs/04-roadmap.md](docs/04-roadmap.md).
+**M1 done** — timelines render. Ingest and selection are next. See [TODO.md](TODO.md).
 
-## Quick start
+## Docs
 
-```bash
-uv sync
-uv run genvai doctor          # reports what is available on this machine
-uv run genvai list            # projects
-uv run genvai render <id>     # render a timeline to MP4
-```
-
-Full setup, optional extras, and how to move the project to another system:
-[docs/05-setup.md](docs/05-setup.md).
-
-## Documentation
-
-Start at **[docs/README.md](docs/README.md)**.
-
-| | |
-| --- | --- |
-| [Vision](docs/00-vision.md) | What this is for, and why camera roll over text-to-video |
-| [Requirements](docs/01-requirements.md) | Functional and non-functional |
-| [Architecture](docs/02-architecture.md) | Ports and adapters, data flow, incremental rendering |
-| [Timeline schema](docs/03-timeline-schema.md) | The core data contract and the edit-op vocabulary |
-| [Backlog](docs/07-backlog.md) | Understood but deliberately not built, and why |
-| [Roadmap](docs/04-roadmap.md) | Milestones and open questions |
-| [Setup](docs/05-setup.md) | Environment and portability |
-| [Decisions](docs/06-decisions.md) | What was chosen, what was rejected, and why |
-
-## Design notes
-
-The **timeline is immutable data**. Planning produces one, edits are pure
-`Timeline -> Timeline` transforms, and rendering is the only side effect. Every version
-is kept on disk, so any edit is reversible and any result is reproducible from its seed.
-
-A project is a **plain directory** - open it and you can see every asset, every timeline
-version, and every LLM prompt that produced them.
-
-The work is split so the machine does the measuring and the model does the judging.
-Sharpness, exposure, shake and duplicate detection are classical CV on the CPU - no
-model, no GPU. The LLM is only asked what it is actually good at: what order tells a
-story, what the opening shot should be, what the text says. That keeps the edit
-reproducible and works on modest hardware.
+[docs/](docs/) — [vision](docs/vision.md) · [architecture](docs/architecture.md) ·
+[timeline format](docs/timeline.md) · [setup](docs/setup.md) ·
+[decisions](docs/decisions.md) · [backlog](docs/backlog.md)

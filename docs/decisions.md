@@ -1,0 +1,79 @@
+# Decisions
+
+Why the project looks the way it does. The rejected option is usually the part that gets
+forgotten and re-argued, so it is recorded too.
+
+### Camera roll over text-to-video
+
+Generating video from a prompt is crowded, and a 4 GB GPU loses there. Real footage
+sidesteps image quality entirely and leaves the LLM doing what it is good at.
+**Rejected:** idea mode as the headline — parked, not deleted.
+
+### Motion from stills, not generative video
+
+Video diffusion needs 12–24 GB. Ken Burns and transitions on stills produce real motion
+and read as deliberate when chosen per scene.
+**Revisit** when hardware grows; the `ImageProvider` port extends without pipeline change.
+
+### Timeline JSON as the single source of truth
+
+Makes conversational editing tractable — "change scene 2" is a function on data, not a
+replay of a generation. Inspectable, diffable, restorable, testable with no model.
+**Rejected:** re-prompting to regenerate the whole video; non-deterministic and it
+silently changes parts the user liked.
+
+### Typed edit operations, not timeline rewrites
+
+A model handed a whole timeline drifts on fields nobody asked it to touch. Ops are small,
+individually validatable, atomic, reviewable, reversible.
+**Rejected:** RFC-6902 JSON Patch — LLMs handle pointer paths badly and a wrong path
+writes silently to the wrong place.
+
+### Measurement separate from judgement
+
+Sharpness, exposure, shake and duplicates are objective and cheap on the CPU.
+Shortlisting is pure and deterministic. Only then does the LLM see a compact description.
+Keeps context small, edits reproducible, and the whole thing runnable on modest hardware.
+
+### Music consent
+
+The LLM describes a track, the provider returns candidates, nothing is fetched until the
+user approves one. Licence and source URL recorded. `MusicProvider.fetch` takes
+`confirmed` as an argument rather than reading config, so no call site can reach the
+network invisibly.
+**Rejected:** auto-fetching a best match — surprising, and a licensing risk.
+
+### Ports and adapters, protocols in one file
+
+Pipeline is testable with zero models installed; backends swap without touching core
+logic. One file means the whole boundary reads in one sitting.
+**Rejected:** a package of seven two-line files — more structure, less clarity.
+
+### Phase-ordered model loading
+
+4 GB cannot hold a 7B LLM and a diffusion model at once. All LLM work completes before
+any image generates. A correctness constraint, not tuning — violating it is an OOM crash
+mid-render. Consequence: the planner emits a complete plan in one pass.
+
+### uv, heavy stacks as extras
+
+`uv sync` reproduces the environment exactly and installs Python itself. torch in the
+base would force 3 GB on machines that will only ever use procedural visuals.
+**Rejected:** conda (heavy), pip + requirements.txt (no real lock), poetry (slower).
+
+### Bundled ffmpeg
+
+The difference between "clone and run" and "clone, then install ffmpeg and fix PATH". A
+system binary wins when present, for the wider codec set.
+
+### Filesystem as the store
+
+Inspectable, copyable, diffable, no service to run. The fingerprint *is* the filename, so
+there is no cache to invalidate.
+**Rejected:** SQLite or Postgres — real overhead, no concurrent writers, no queries.
+
+### Frozen pydantic models
+
+Immutability by construction, validation at the boundary, and JSON Schema export for
+free — which is exactly what constrained LLM decoding needs.
+**Rejected:** dataclasses (no validation), dicts (no contract).

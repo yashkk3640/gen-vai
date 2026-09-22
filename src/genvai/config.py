@@ -21,7 +21,7 @@ class LLMSettings(BaseModel):
         default="0s",
         description=(
             "Ollama unload delay. Defaults to immediate release so the GPU is free "
-            "for the diffusion model; see docs/02-architecture.md."
+            "for the diffusion model; see docs/architecture.md."
         ),
     )
 
@@ -51,7 +51,7 @@ class MusicSettings(BaseModel):
         default=False,
         description=(
             "Master switch only. Even when true, each track still needs explicit "
-            "per-track confirmation; see 'Music consent' in docs/06-decisions.md."
+            "per-track confirmation; see 'Music consent' in docs/decisions.md."
         ),
     )
 

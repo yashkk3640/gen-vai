@@ -4,7 +4,7 @@ Every model here is frozen. Edits produce new values via the pure transforms in
 `ops.py`; nothing is ever mutated in place.
 
 The prose contract, including field-by-field notes and the music state machine,
-lives in docs/03-timeline-schema.md.
+lives in docs/timeline.md.
 """
 
 from typing import Annotated, Literal
@@ -298,7 +298,7 @@ class Music(Frozen):
     """Music, as a state machine.
 
     Nothing is downloaded until `state` reaches `approved`, and that transition can
-    only be made by an explicit user choice. See 'Music consent' in docs/06-decisions.md.
+    only be made by an explicit user choice. See 'Music consent' in docs/decisions.md.
     """
 
     state: MusicState = "none"
@@ -349,7 +349,7 @@ and a track baked into the file is not an attached sound - it forfeits that sign
 and risks Content-ID muting besides. So the default is to emit a `narration_only`
 cut alongside the full mix: upload that one and attach the trending sound in the app.
 
-See docs/07-backlog.md for the reasoning and its limits.
+See docs/backlog.md for the reasoning and its limits.
 """
 
 
@@ -447,7 +447,7 @@ class Timeline(Frozen):
             "Appended to every generated image prompt. Holding one phrase constant "
             "across scenes is the cheapest defence against each shot looking like it "
             "came from a different video. A partial fix - see "
-            "'Character and scene consistency' in docs/07-backlog.md."
+            "'Character and scene consistency' in docs/backlog.md."
         ),
     )
 

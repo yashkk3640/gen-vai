@@ -66,7 +66,7 @@ def doctor() -> None:
     console.print(table)
     console.print(
         "\n[dim]Missing optional components are not errors - the pipeline degrades "
-        "to procedural visuals and silent audio. See docs/05-setup.md.[/dim]"
+        "to procedural visuals and silent audio. See docs/setup.md.[/dim]"
     )
 
 
@@ -220,7 +220,7 @@ def music(
 def _not_yet(command: str, milestone: str) -> None:
     console.print(
         f"[yellow]'{command}' is not implemented yet[/yellow] - scheduled for {milestone}.\n"
-        "[dim]See docs/04-roadmap.md for what is built and what comes next.[/dim]"
+        "[dim]See TODO.md for what is built and what comes next.[/dim]"
     )
     raise typer.Exit(code=2)
 

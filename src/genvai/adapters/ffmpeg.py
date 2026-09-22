@@ -530,7 +530,7 @@ def _fit(fit: str, canvas: Canvas, *, oversample: int = 1) -> str:
             f",pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color={canvas.background}"
         )
     if fit == "blur_pad":
-        # Approximated as cover until the split/overlay graph lands; see the roadmap.
+        # Approximated as cover until the split/overlay graph lands; see TODO.md.
         return f",scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height}"
     return f",scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height}"
 

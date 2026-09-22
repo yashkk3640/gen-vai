@@ -16,8 +16,9 @@ def resolve_visuals(
 ) -> Timeline:
     """Generate one image per unresolved scene and attach the asset.
 
-    Approved visuals are skipped, even if their prompt changed (requirement F3.4).
-    Falls back to a procedural card when `images.is_available()` is False.
+    Approved visuals are skipped even if their prompt changed - a visual the user
+    blessed is never silently replaced. Falls back to a procedural card when
+    `images.is_available()` is False.
     """
     raise NotImplementedError
 
@@ -31,7 +32,7 @@ def resolve_narration(
     """Synthesise each narration line and reconcile scene durations against it.
 
     Scenes stretch to fit their audio rather than truncating speech - the least
-    destructive of the options, though see the open question in docs/04-roadmap.md.
+    destructive of the options, though see the open question in TODO.md.
     """
     raise NotImplementedError
 
@@ -56,6 +57,6 @@ def fetch_approved_music(
     """Download the selected track and record its licence.
 
     Requires `state == "approved"` and `confirmed is True`; raises
-    `ConfirmationRequired` otherwise. See 'Music consent' in docs/06-decisions.md.
+    `ConfirmationRequired` otherwise. See 'Music consent' in docs/decisions.md.
     """
     raise NotImplementedError

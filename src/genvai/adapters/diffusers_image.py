@@ -37,7 +37,7 @@ class DiffusersImageProvider:
         """Generate deterministically from `seed`.
 
         On CUDA OOM, retries at half resolution and upscales - a smaller image beats a
-        failed render. See docs/04-roadmap.md M4.
+        failed render. See TODO.md M4.
         """
         raise NotImplementedError
 

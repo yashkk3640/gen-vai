@@ -5,7 +5,7 @@ filesystem - sits behind a Protocol here. Core and pipeline code imports only fr
 this module, never from `adapters`.
 
 Keeping all of them together is deliberate: the entire surface the project depends on
-should be readable in one sitting. See 'Ports and adapters' in docs/06-decisions.md.
+should be readable in one sitting. See 'Ports and adapters' in docs/decisions.md.
 """
 
 from pathlib import Path
@@ -56,7 +56,7 @@ class LLMPort(Protocol):
         """Release the model from VRAM.
 
         Called at the plan/resolve phase boundary; at 4 GB the LLM and the diffusion
-        model cannot coexist. See 'Phase-ordered model loading' in docs/06-decisions.md.
+        model cannot coexist. See 'Phase-ordered model loading' in docs/decisions.md.
         """
         ...
 
@@ -124,7 +124,7 @@ class MusicProvider(Protocol):
         Raises `ConfirmationRequired` unless `confirmed` is True. The flag is passed
         explicitly rather than read from config so that no call site can reach the
         network without the consent being visible in the code.
-        See 'Music consent' in docs/06-decisions.md.
+        See 'Music consent' in docs/decisions.md.
         """
         ...
 
@@ -264,7 +264,7 @@ class MediaInfo(BaseModel):
 
 @runtime_checkable
 class ProjectStore(Protocol):
-    """Persistence. A project is a directory; see docs/02-architecture.md."""
+    """Persistence. A project is a directory; see docs/architecture.md."""
 
     def create(self, intent: str, project_id: str | None = None) -> Project: ...
 

@@ -2,7 +2,7 @@
 
 The planner emits a complete storyboard in a single pass. It cannot look at a
 generated image and reconsider, because the LLM is unloaded before the diffusion model
-loads - see 'Phase-ordered model loading' in docs/06-decisions.md.
+loads - see 'Phase-ordered model loading' in docs/decisions.md.
 """
 
 from pathlib import Path
@@ -34,6 +34,6 @@ def storyboard_schema_for_llm() -> dict[str, object]:
 
     A reduced view of `Timeline`: fields the model must never write - asset_id, sha256,
     path, provenance, version, assets - are excluded outright rather than filtered after
-    the fact. See docs/03-timeline-schema.md.
+    the fact. See docs/timeline.md.
     """
     raise NotImplementedError

@@ -2,7 +2,7 @@
 
 On an edit request the model returns `{"ops": [...]}`, never a replacement timeline.
 Each op is small, individually validatable, and applied atomically with the rest -
-see 'Typed edit operations' in docs/06-decisions.md for why.
+see 'Typed edit operations' in docs/decisions.md for why.
 
 `apply` is pure and total: `Timeline -> Timeline`. Validation happens first, over the
 whole list, so a rejected op leaves the project untouched.
@@ -313,6 +313,6 @@ def apply(timeline: Timeline, ops: tuple[EditOp, ...]) -> Timeline:
 def describe(timeline: Timeline, ops: tuple[EditOp, ...]) -> tuple[str, ...]:
     """Human-readable lines describing what each op will change.
 
-    Shown to the user before re-rendering, per requirement F6.4.
+    Shown to the user before re-rendering, so the user sees the change before it happens.
     """
     raise NotImplementedError
