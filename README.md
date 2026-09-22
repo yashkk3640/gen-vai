@@ -40,7 +40,8 @@ genvai render trip                      # re-render (only what changed)
 | `add` | Import and analyse media | yes |
 | `media` | Show what was found, with scores | yes |
 | `reel` | Build a reel — picks, trims, orders, captions | yes |
-| `edit` | Change it in plain English | M4 |
+| `edit` | Change it in plain English, with a diff first | yes |
+| `restore` | Put back an earlier version | yes |
 | `music` | Suggest and approve a track | M5 |
 
 A project is a plain folder under `projects/`. Open it and you can see every asset, every

@@ -28,6 +28,7 @@ from genvai.timeline import (
     Narration,
     Scene,
     SceneRole,
+    TextOverlay,
     TextStyle,
     Timeline,
     Transition,
@@ -153,6 +154,19 @@ class SetOverlayText(Frozen):
     content: str
 
 
+class SetSceneCaption(Frozen):
+    """Set a scene's on-screen text, creating or clearing it as needed.
+
+    Distinct from SetOverlayText, which edits an overlay that already exists. Users ask
+    to "put a caption on the third shot" without knowing whether one is there, so the
+    op that serves them has to handle both, and an empty string has to mean remove it.
+    """
+
+    op: Literal["set_scene_caption"] = "set_scene_caption"
+    scene_id: str
+    content: str
+
+
 class SetTransition(Frozen):
     op: Literal["set_transition"] = "set_transition"
     scene_id: str
@@ -264,6 +278,7 @@ EditOp = Annotated[
     | SetMotion
     | SetNarration
     | SetOverlayText
+    | SetSceneCaption
     | SetTransition
     | InsertScene
     | RemoveScene
@@ -498,6 +513,9 @@ def _apply(op: EditOp, timeline: Timeline) -> Timeline:
         case SetOverlayText():
             return _map_scene(timeline, op.scene_id, lambda s: _captioned(s, op.index, op.content))
 
+        case SetSceneCaption():
+            return _map_scene(timeline, op.scene_id, lambda s: _recaptioned(s, op.content))
+
         case SetTransition():
             return _map_scene(
                 timeline,
@@ -637,6 +655,10 @@ def _describe(op: EditOp, timeline: Timeline) -> str:
             return f"{where}: say '{op.text[:50]}'"
         case SetOverlayText():
             return f"{where}: caption becomes '{op.content[:50]}'"
+        case SetSceneCaption():
+            if not op.content.strip():
+                return f"{where}: remove the caption"
+            return f"{where}: caption '{op.content[:50]}'"
         case SetTransition():
             return f"{where}: enter with {op.transition.kind}"
         case SetSceneRole():
@@ -715,6 +737,14 @@ def _captioned(scene: Scene, index: int, content: str) -> Scene:
     overlays = list(scene.overlays)
     overlays[index] = overlays[index].model_copy(update={"content": content})
     return scene.model_copy(update={"overlays": tuple(overlays)})
+
+
+def _recaptioned(scene: Scene, content: str) -> Scene:
+    """Replace the leading text overlay, adding or dropping it as the content requires."""
+    rest = tuple(o for o in scene.overlays if not isinstance(o, TextOverlay))
+    if not content.strip():
+        return scene.model_copy(update={"overlays": rest})
+    return scene.model_copy(update={"overlays": (TextOverlay(content=content), *rest)})
 
 
 def _reroled(scene: Scene, target_id: str, role: SceneRole) -> Scene:

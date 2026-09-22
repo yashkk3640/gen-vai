@@ -22,6 +22,7 @@ from genvai.adapters.fs_store import FilesystemStore
 from genvai.adapters.ollama import OllamaLLM
 from genvai.config import load_settings
 from genvai.errors import GenvaiError, RenderError
+from genvai.pipeline.edit import edit as run_edit
 from genvai.pipeline.ingest import ingest, summarise
 from genvai.pipeline.render import plan_render
 from genvai.pipeline.render import render as render_timeline
@@ -213,8 +214,47 @@ def edit(
     request: str = typer.Argument(..., help="What to change, in plain language."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip the diff confirmation."),
 ) -> None:
-    """Apply a change to an existing project and re-render what moved."""
-    _not_yet("edit", "M4")
+    """Apply a change to an existing project and re-render what moved.
+
+    Shows what will change before doing it. Every version is kept, so 'genvai restore'
+    can always put back what was there.
+    """
+    settings = load_settings()
+    store = FilesystemStore(settings.projects_dir)
+    llm = OllamaLLM(settings.llm)
+    if not llm.is_available():
+        console.print(
+            f"[red]{settings.llm.model} is not available[/red] - editing needs the model "
+            "to read your request. [dim]genvai doctor[/dim] says what is missing."
+        )
+        raise typer.Exit(code=1)
+
+    try:
+        before = store.load_timeline(project)
+        after, changes = run_edit(request, before, llm)
+    except GenvaiError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from exc
+
+    console.print(f"[bold]{project}[/bold] v{before.version} -> v{after.version}")
+    for line in changes:
+        console.print(f"  [cyan]{line}[/cyan]")
+    console.print(
+        f"  [dim]{before.duration:.1f}s -> {after.duration:.1f}s, "
+        f"{len(before.scenes)} -> {len(after.scenes)} shots[/dim]"
+    )
+
+    if not yes and not typer.confirm("Apply and re-render?", default=True):
+        console.print("[dim]Nothing changed.[/dim]")
+        return
+
+    store.save_timeline(project, after)
+    plan = plan_render(after, project, store)
+    console.print(f"[dim]{plan.summary()}[/dim]")
+    renderer = FFmpegRenderer(settings.render, lambda asset_id: store.asset_path(project, asset_id))
+    for variant, path in render_timeline(after, project, renderer, store).items():
+        console.print(f"  [green]{variant}[/green]  {path}")
+    console.print(f"[dim]Undo with: genvai restore {project} {before.version}[/dim]")
 
 
 @app.command()
@@ -293,7 +333,21 @@ def restore(
     version: int = typer.Argument(..., help="Version to restore."),
 ) -> None:
     """Restore an earlier timeline version. Nothing is ever lost, so this always works."""
-    _not_yet("restore", "M4")
+    settings = load_settings()
+    store = FilesystemStore(settings.projects_dir)
+    try:
+        wanted = store.load_timeline(project, version)
+    except GenvaiError as exc:
+        available = ", ".join(f"v{v}" for v in store.versions(project)) or "none"
+        console.print(f"[red]{exc}[/red]  [dim]Available: {available}[/dim]")
+        raise typer.Exit(code=1) from exc
+
+    # Restoring copies forward rather than rewinding, so the history stays append-only
+    # and the version you came from is still there to go back to.
+    restored = wanted.model_copy(update={"version": max(store.versions(project)) + 1})
+    store.save_timeline(project, restored)
+    console.print(f"[bold]{project}[/bold] restored v{version} as v{restored.version}")
+    console.print(f"[dim]Render it with: genvai render {project}[/dim]")
 
 
 @app.command()
