@@ -298,6 +298,10 @@ class ProjectStore(Protocol):
         """
         ...
 
+    def load_asset(self, project_id: str, asset_id: str) -> Asset:
+        """Rebuild an Asset record for a stored file."""
+        ...
+
     def asset_path(self, project_id: str, asset_id: str) -> Path: ...
 
     def save_media(self, project_id: str, library: MediaLibrary) -> None:

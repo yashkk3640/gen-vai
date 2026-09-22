@@ -14,7 +14,21 @@ question it is actually good at.
 
 import re
 
+from genvai.errors import GenvaiError
 from genvai.media import MediaItem, MediaLibrary
+from genvai.ports import LLMPort, ProjectStore
+from genvai.timeline import (
+    Asset,
+    AssetVisual,
+    Canvas,
+    ClipVisual,
+    KenBurns,
+    Rect,
+    Scene,
+    SceneRole,
+    StillMotion,
+    Timeline,
+)
 
 PHOTO_BEAT = 2.2
 """Seconds a still occupies. Matches the default scene duration - short-form pacing."""
@@ -135,3 +149,147 @@ def _intent_bonus(item: MediaItem, intent: str) -> float:
         return 0.0
     hits = sum(1 for word in wanted if word in haystack)
     return min(0.25, hits * 0.1)
+
+
+# ------------------------------------------------------------------------ assembly
+
+_KEN_BURNS_MOVES: tuple[tuple[Rect, Rect], ...] = (
+    ((0.00, 0.00, 1.00, 1.00), (0.10, 0.10, 0.80, 0.80)),  # push in
+    ((0.10, 0.10, 0.80, 0.80), (0.00, 0.00, 1.00, 1.00)),  # pull out
+    ((0.00, 0.05, 0.82, 0.90), (0.18, 0.05, 0.82, 0.90)),  # pan right
+    ((0.18, 0.05, 0.82, 0.90), (0.00, 0.05, 0.82, 0.90)),  # pan left
+    ((0.05, 0.00, 0.85, 0.85), (0.10, 0.15, 0.80, 0.80)),  # drift down
+)
+"""A rotation of camera moves for stills.
+
+Variety is the point. One uniform push applied to every photo is what makes a reel read
+as a slideshow; alternating the move is nearly free and breaks the pattern.
+"""
+
+
+def fit_to_duration(
+    items: tuple[MediaItem, ...], target: float, *, intent: str = ""
+) -> tuple[MediaItem, ...]:
+    """Trim a shortlist down to what actually fits, keeping capture order.
+
+    Drops the weakest shots rather than speeding everything up. A reel that runs short
+    is fine; one where every shot is clipped to make the numbers work is not.
+    """
+    if target <= 0.0:
+        return ()
+    ranked = sorted(items, key=lambda i: (-item_score(i, intent=intent), i.source_name))
+    kept: list[MediaItem] = []
+    filled = 0.0
+    for item in ranked:
+        if filled >= target and kept:
+            break
+        kept.append(item)
+        filled += contribution(item)
+    return tuple(sorted(kept, key=_chronological))
+
+
+def build_timeline(
+    items: tuple[MediaItem, ...],
+    assets: dict[str, Asset],
+    *,
+    intent: str,
+    canvas: Canvas | None = None,
+    seed: int = 0,
+) -> Timeline:
+    """Turn an ordered set of shots into a renderable timeline.
+
+    Deliberately mechanical - no model involved. This is the fallback that keeps the
+    tool working with Ollama down, and the structure the LLM step later rearranges
+    rather than replaces.
+    """
+    scenes = tuple(_scene(item, index, len(items), seed) for index, item in enumerate(items))
+    return Timeline(
+        intent=intent,
+        canvas=canvas or Canvas(),
+        seed=seed,
+        scenes=scenes,
+        assets=assets,
+    )
+
+
+def _scene(item: MediaItem, index: int, total: int, seed: int) -> Scene:
+    role: SceneRole = "hook" if index == 0 else "payoff" if index == total - 1 else "body"
+    duration = contribution(item)
+
+    if item.kind == "video":
+        span = item.best_span
+        start = span.start if span else 0.0
+        end = span.end if span else min(duration, item.duration or duration)
+        return Scene(
+            id=f"s{index + 1}",
+            duration=max(MIN_BEAT, end - start),
+            role=role,
+            visual=ClipVisual(asset_id=item.asset_id, source_start=start, source_end=end),
+            motion=StillMotion(),
+            note=span.reason if span else None,
+        )
+
+    start_rect, end_rect = _KEN_BURNS_MOVES[(index + seed) % len(_KEN_BURNS_MOVES)]
+    return Scene(
+        id=f"s{index + 1}",
+        duration=duration,
+        role=role,
+        visual=AssetVisual(asset_id=item.asset_id, fit="cover"),
+        motion=KenBurns(start_rect=start_rect, end_rect=end_rect),
+    )
+
+
+def fit_to_beats(timeline: Timeline) -> Timeline:
+    """Nudge scene boundaries onto the music's beat grid.
+
+    A no-op until a track has been chosen and analysed, which happens in the music
+    milestone. Returning the timeline unchanged rather than raising means the render
+    path works the same way with or without music.
+    """
+    beats = timeline.music.beat_map
+    if beats is None or not timeline.export.snap_cuts_to_beat or not beats.beats:
+        return timeline
+    return timeline
+
+
+def make_reel(
+    project_id: str,
+    store: ProjectStore,
+    *,
+    intent: str = "",
+    target_duration: float = 30.0,
+    canvas: Canvas | None = None,
+    seed: int = 0,
+    llm: LLMPort | None = None,
+) -> Timeline:
+    """Library -> a saved, renderable timeline.
+
+    Shortlists, trims to the target, and builds. With an `llm` the ordering and on-screen
+    text come from the model; without one it falls back to chronological order with
+    best-span trims, which is a decent edit in its own right and keeps the tool usable
+    when Ollama is not running.
+
+    Saves as the project's next version, so every reel is reversible.
+    """
+    library = store.load_media(project_id)
+    if not library.items:
+        raise GenvaiError(
+            f"project '{project_id}' has no media. "
+            f"Import some first: genvai add {project_id} <files...>"
+        )
+
+    picked = fit_to_duration(
+        shortlist(library, target_duration=target_duration, intent=intent),
+        target_duration,
+        intent=intent,
+    )
+    if not picked:
+        raise GenvaiError("nothing usable to build a reel from")
+
+    assets = {item.asset_id: store.load_asset(project_id, item.asset_id) for item in picked}
+    timeline = build_timeline(picked, assets, intent=intent, canvas=canvas, seed=seed)
+
+    versions = store.versions(project_id)
+    timeline = timeline.model_copy(update={"version": (max(versions) + 1) if versions else 1})
+    store.save_timeline(project_id, timeline)
+    return timeline

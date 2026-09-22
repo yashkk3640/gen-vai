@@ -134,6 +134,23 @@ class FilesystemStore:
             provenance=provenance,
         )
 
+    def load_asset(self, project_id: str, asset_id: str) -> Asset:
+        """Rebuild an Asset record from what is on disk.
+
+        Nothing extra is persisted because nothing needs to be: the id *is* the content
+        digest, and the directory it sits in says what kind of media it is.
+        """
+        path = self.asset_path(project_id, asset_id)
+        relative = path.relative_to(self.project_dir(project_id))
+        folder = relative.parts[1]
+        kind = next((k for k, sub in _ASSET_DIRS.items() if sub == folder), "image")
+        return Asset(
+            kind=kind,  # type: ignore[arg-type]
+            path=relative.as_posix(),
+            sha256=asset_id,
+            provenance=AssetProvenance(provider="import"),
+        )
+
     def asset_path(self, project_id: str, asset_id: str) -> Path:
         """Resolve an asset id to a file, whatever extension it was stored with."""
         base = self.project_dir(project_id) / "assets"

@@ -5,6 +5,7 @@ HTTP API can be added over the same core without moving anything.
 """
 
 import importlib.util
+import secrets
 import shutil
 import sys
 from pathlib import Path
@@ -23,6 +24,8 @@ from genvai.errors import GenvaiError, RenderError
 from genvai.pipeline.ingest import ingest, summarise
 from genvai.pipeline.render import plan_render
 from genvai.pipeline.render import render as render_timeline
+from genvai.pipeline.select import make_reel
+from genvai.timeline import Canvas
 
 app = typer.Typer(
     name="genvai",
@@ -116,7 +119,30 @@ def reel(
     seed: int = typer.Option(0, "--seed", help="0 picks a random seed and records it."),
 ) -> None:
     """Build a reel from the project's media."""
-    _not_yet("reel", "M3")
+    settings = load_settings()
+    store = FilesystemStore(settings.projects_dir)
+    try:
+        timeline = make_reel(
+            project,
+            store,
+            intent=intent or f"reel from {project}",
+            target_duration=duration,
+            canvas=_canvas_for(aspect),
+            seed=seed or _random_seed(),
+        )
+    except GenvaiError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from exc
+
+    console.print(
+        f"[bold]{project}[/bold] v{timeline.version}  "
+        f"{len(timeline.scenes)} shots  {timeline.duration:.1f}s  "
+        f"(beat {timeline.mean_scene_duration:.1f}s)"
+    )
+    renderer = FFmpegRenderer(settings.render, lambda asset_id: store.asset_path(project, asset_id))
+    outputs = render_timeline(timeline, project, renderer, store)
+    for variant, path in outputs.items():
+        console.print(f"  [green]{variant}[/green]  {path}")
 
 
 @app.command()
@@ -280,6 +306,23 @@ def _not_yet(command: str, milestone: str) -> None:
         "[dim]See TODO.md for what is built and what comes next.[/dim]"
     )
     raise typer.Exit(code=2)
+
+
+def _canvas_for(aspect: str) -> Canvas:
+    """Turn a ratio into a canvas. Vertical is the default because reels are."""
+    presets = {
+        "9:16": Canvas(width=1080, height=1920),
+        "16:9": Canvas(width=1920, height=1080),
+        "1:1": Canvas(width=1080, height=1080),
+    }
+    if aspect not in presets:
+        console.print(f"[yellow]unknown aspect '{aspect}', using 9:16[/yellow]")
+    return presets.get(aspect, presets["9:16"])
+
+
+def _random_seed() -> int:
+    """A recorded seed, so the same reel can be rebuilt exactly."""
+    return secrets.randbelow(2**31)
 
 
 def _probe_ffmpeg() -> tuple[str, str]:
