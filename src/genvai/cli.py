@@ -19,6 +19,7 @@ from genvai import __version__
 from genvai.adapters.analyzer import FrameAnalyzer
 from genvai.adapters.ffmpeg import FFmpegRenderer, resolve_ffmpeg
 from genvai.adapters.fs_store import FilesystemStore
+from genvai.adapters.ollama import OllamaLLM
 from genvai.config import load_settings
 from genvai.errors import GenvaiError, RenderError
 from genvai.pipeline.ingest import ingest, summarise
@@ -121,6 +122,14 @@ def reel(
     """Build a reel from the project's media."""
     settings = load_settings()
     store = FilesystemStore(settings.projects_dir)
+    llm: OllamaLLM | None = OllamaLLM(settings.llm)
+    if llm is not None and not llm.is_available():
+        console.print(
+            f"[yellow]{settings.llm.model} not available[/yellow] - ordering shots by "
+            "capture time instead. [dim]genvai doctor[/dim] says what is missing."
+        )
+        llm = None
+
     try:
         timeline = make_reel(
             project,
@@ -129,6 +138,8 @@ def reel(
             target_duration=duration,
             canvas=_canvas_for(aspect),
             seed=seed or _random_seed(),
+            llm=llm,
+            on_note=lambda note: console.print(f"[yellow]{note}[/yellow]"),
         )
     except GenvaiError as exc:
         console.print(f"[red]{exc}[/red]")

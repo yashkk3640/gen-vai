@@ -13,6 +13,9 @@ question it is actually good at.
 """
 
 import re
+from collections.abc import Callable
+
+from pydantic import Field
 
 from genvai.errors import GenvaiError
 from genvai.media import MediaItem, MediaLibrary
@@ -22,11 +25,13 @@ from genvai.timeline import (
     AssetVisual,
     Canvas,
     ClipVisual,
+    Frozen,
     KenBurns,
     Rect,
     Scene,
     SceneRole,
     StillMotion,
+    TextOverlay,
     Timeline,
 )
 
@@ -195,14 +200,19 @@ def build_timeline(
     intent: str,
     canvas: Canvas | None = None,
     seed: int = 0,
+    captions: dict[str, str] | None = None,
+    hook_asset_id: str | None = None,
 ) -> Timeline:
     """Turn an ordered set of shots into a renderable timeline.
 
-    Deliberately mechanical - no model involved. This is the fallback that keeps the
-    tool working with Ollama down, and the structure the LLM step later rearranges
-    rather than replaces.
+    Mechanical by design - no model involved. With `captions` and `hook_asset_id` it
+    applies the model's judgement; without them it is the chronological fallback that
+    keeps the tool working when Ollama is not running.
     """
-    scenes = tuple(_scene(item, index, len(items), seed) for index, item in enumerate(items))
+    scenes = tuple(
+        _scene(item, index, len(items), seed, captions or {}, hook_asset_id)
+        for index, item in enumerate(items)
+    )
     return Timeline(
         intent=intent,
         canvas=canvas or Canvas(),
@@ -212,9 +222,20 @@ def build_timeline(
     )
 
 
-def _scene(item: MediaItem, index: int, total: int, seed: int) -> Scene:
-    role: SceneRole = "hook" if index == 0 else "payoff" if index == total - 1 else "body"
+def _scene(
+    item: MediaItem,
+    index: int,
+    total: int,
+    seed: int,
+    captions: dict[str, str],
+    hook_asset_id: str | None,
+) -> Scene:
+    role = _role(item, index, total, hook_asset_id)
     duration = contribution(item)
+    overlays: tuple[TextOverlay, ...] = ()
+    caption = (captions.get(item.asset_id) or "").strip()
+    if caption:
+        overlays = (TextOverlay(content=caption),)
 
     if item.kind == "video":
         span = item.best_span
@@ -226,6 +247,7 @@ def _scene(item: MediaItem, index: int, total: int, seed: int) -> Scene:
             role=role,
             visual=ClipVisual(asset_id=item.asset_id, source_start=start, source_end=end),
             motion=StillMotion(),
+            overlays=overlays,
             note=span.reason if span else None,
         )
 
@@ -236,7 +258,17 @@ def _scene(item: MediaItem, index: int, total: int, seed: int) -> Scene:
         role=role,
         visual=AssetVisual(asset_id=item.asset_id, fit="cover"),
         motion=KenBurns(start_rect=start_rect, end_rect=end_rect),
+        overlays=overlays,
     )
+
+
+def _role(item: MediaItem, index: int, total: int, hook_asset_id: str | None) -> SceneRole:
+    """Hook first, payoff last, body between - unless the model nominated a hook."""
+    if hook_asset_id and item.asset_id == hook_asset_id:
+        return "hook"
+    if hook_asset_id:
+        return "payoff" if index == total - 1 else "body"
+    return "hook" if index == 0 else "payoff" if index == total - 1 else "body"
 
 
 def fit_to_beats(timeline: Timeline) -> Timeline:
@@ -261,6 +293,7 @@ def make_reel(
     canvas: Canvas | None = None,
     seed: int = 0,
     llm: LLMPort | None = None,
+    on_note: Callable[[str], None] | None = None,
 ) -> Timeline:
     """Library -> a saved, renderable timeline.
 
@@ -286,10 +319,145 @@ def make_reel(
     if not picked:
         raise GenvaiError("nothing usable to build a reel from")
 
+    captions: dict[str, str] = {}
+    hook: str | None = None
+    if llm is not None:
+        try:
+            picked, captions, hook = order_with_llm(
+                picked, llm, intent=intent, target_duration=target_duration
+            )
+        except GenvaiError as exc:
+            # A model that is down or unhelpful must not cost the user their reel.
+            # Chronological order with measured trims is a decent edit on its own.
+            if on_note:
+                on_note(f"{exc} Falling back to chronological order.")
+
     assets = {item.asset_id: store.load_asset(project_id, item.asset_id) for item in picked}
-    timeline = build_timeline(picked, assets, intent=intent, canvas=canvas, seed=seed)
+    timeline = build_timeline(
+        picked,
+        assets,
+        intent=intent,
+        canvas=canvas,
+        seed=seed,
+        captions=captions,
+        hook_asset_id=hook,
+    )
 
     versions = store.versions(project_id)
     timeline = timeline.model_copy(update={"version": (max(versions) + 1) if versions else 1})
     store.save_timeline(project_id, timeline)
     return timeline
+
+
+# ---------------------------------------------------------------- model ordering
+
+
+class ShotChoice(Frozen):
+    """One shot's place in the cut, as the model returns it."""
+
+    asset_id: str
+    caption: str = Field(default="", description="On-screen text, or empty for none.")
+
+
+class ReelPlan(Frozen):
+    """What the model is asked for. Deliberately small.
+
+    Schema size is the dominant factor in small-model reliability: asking a 3B model for
+    order, duration, role *and* caption produced two hooks and a nonsense rationale,
+    while asking only for order, caption and one hook id was reliable. Durations are not
+    here because they were already measured - a model should not be asked to invent a
+    number that is known.
+    """
+
+    order: tuple[ShotChoice, ...]
+    hook_asset_id: str = Field(default="", description="Which shot opens the reel.")
+
+
+SYSTEM_PROMPT = (
+    "You are a short-form video editor. You arrange clips and photos into a reel. "
+    "Reply with JSON only."
+)
+
+CAPTION_LIMIT = 40
+
+
+def describe(items: tuple[MediaItem, ...]) -> str:
+    """A compact description of the shortlist, one line per shot.
+
+    The model never sees pixels. It sees what each shot is, how long, when it was taken
+    and what the measurement said about it - enough to order them, and small enough that
+    twenty shots still fit comfortably in a 3B model's attention.
+    """
+    lines = []
+    for item in items:
+        parts = [item.asset_id[:12], "clip" if item.kind == "video" else "photo"]
+        span = item.best_span
+        if span is not None:
+            parts.append(f"{span.duration:.1f}s ({span.reason})")
+        if item.captured_at:
+            parts.append(f"taken {item.captured_at[:16]}")
+        if item.tags:
+            parts.append("shows " + ", ".join(item.tags[:4]))
+        lines.append("  " + "  ".join(parts))
+    return "\n".join(lines)
+
+
+def reconcile(
+    plan: ReelPlan, items: tuple[MediaItem, ...]
+) -> tuple[tuple[MediaItem, ...], dict[str, str], str | None]:
+    """Turn a model's answer into something safe to build from.
+
+    Pure, and deliberately forgiving in one direction only. Ids the model invented are
+    dropped; ids it forgot are appended in capture order. A dropped shot is a smaller
+    reel, which is recoverable, while an invented id would fail the render outright.
+
+    Ids are matched on the prefix the model was shown, because it is given a truncated
+    id to keep the prompt short and will echo it back that way.
+    """
+    by_id = {item.asset_id: item for item in items}
+    ordered: list[MediaItem] = []
+    captions: dict[str, str] = {}
+
+    for choice in plan.order:
+        item = _match(choice.asset_id, by_id)
+        if item is None or item in ordered:
+            continue
+        ordered.append(item)
+        caption = choice.caption.strip()
+        if caption:
+            captions[item.asset_id] = caption[:CAPTION_LIMIT]
+
+    missing = [i for i in items if i not in ordered]
+    ordered.extend(sorted(missing, key=_chronological))
+
+    hook = _match(plan.hook_asset_id, by_id)
+    return tuple(ordered), captions, hook.asset_id if hook else None
+
+
+def _match(candidate: str, by_id: dict[str, MediaItem]) -> MediaItem | None:
+    cleaned = candidate.strip()
+    if not cleaned:
+        return None
+    if cleaned in by_id:
+        return by_id[cleaned]
+    hits = [item for key, item in by_id.items() if key.startswith(cleaned)]
+    return hits[0] if len(hits) == 1 else None
+
+
+def order_with_llm(
+    items: tuple[MediaItem, ...], llm: LLMPort, *, intent: str, target_duration: float
+) -> tuple[tuple[MediaItem, ...], dict[str, str], str | None]:
+    """Ask the model to order the shortlist and caption it.
+
+    Raises whatever the LLM port raises; callers decide whether to fall back.
+    """
+    prompt = (
+        f"Arrange these {len(items)} shots into a {target_duration:.0f} second reel.\n"
+        f"What the user asked for: {intent or 'a reel from these shots'}\n\n"
+        f"{describe(items)}\n\n"
+        "Use every id exactly once, in the order they should appear. "
+        "Choose the single most striking shot as the hook, to open on. "
+        f"Give each shot a caption of at most {CAPTION_LIMIT} characters, "
+        "or an empty string where words would add nothing."
+    )
+    return reconcile(llm.structured(prompt, ReelPlan, system=SYSTEM_PROMPT), items)

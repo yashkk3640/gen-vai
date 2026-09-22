@@ -37,9 +37,9 @@ genvai render trip                      # re-render (only what changed)
 | `doctor` | What this machine can do | yes |
 | `list` | Your projects | yes |
 | `render` | Timeline â†’ MP4. `--preview` for a fast proxy, `--dry-run` to see the work | yes |
-| `add` | Import and analyse media | M2 |
-| `media` | Show what was found, with scores | M2 |
-| `reel` | Build a reel | M3 |
+| `add` | Import and analyse media | yes |
+| `media` | Show what was found, with scores | yes |
+| `reel` | Build a reel — picks, trims, orders, captions | yes |
 | `edit` | Change it in plain English | M4 |
 | `music` | Suggest and approve a track | M5 |
 
