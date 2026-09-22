@@ -14,6 +14,7 @@ dependencies = [
     "httpx>=0.27",
     "imageio-ffmpeg>=0.5",      # ships an ffmpeg binary into the venv
     "pillow>=10.4",
+    "numpy>=2.0",          # frame measurement; pure arithmetic, no OpenCV
 ]
 
 [project.optional-dependencies]
