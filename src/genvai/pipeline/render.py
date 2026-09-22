@@ -8,7 +8,7 @@ edit that touches only music skips video entirely.
 from pathlib import Path
 
 from genvai.ports import ProjectStore, RendererPort
-from genvai.timeline import Timeline
+from genvai.timeline import AudioVariant, Timeline
 
 
 def render(
@@ -18,8 +18,11 @@ def render(
     store: ProjectStore,
     *,
     preview: bool = False,
-) -> Path:
+) -> dict[AudioVariant, Path]:
     """Render the timeline, reusing cached segments where fingerprints match.
+
+    Returns one file per variant in `timeline.export.audio_variants`. They share a
+    single video pass, so the extra cuts cost only an audio mux each.
 
     `preview` produces a fast low-resolution proxy for iterating on an edit.
 

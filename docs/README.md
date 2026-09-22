@@ -11,6 +11,7 @@ Read in order on a fresh machine:
 | [04-roadmap.md](04-roadmap.md) | Milestones, current status, what is stubbed |
 | [05-setup.md](05-setup.md) | Environment setup and moving the project to another system |
 | [06-decisions.md](06-decisions.md) | Decision log: what was chosen, what was rejected, and why |
+| [07-backlog.md](07-backlog.md) | Understood but deliberately not built, and why |
 
 **Current status:** documentation, environment, and typed scaffold only.
 No rendering is implemented yet — see [04-roadmap.md](04-roadmap.md).

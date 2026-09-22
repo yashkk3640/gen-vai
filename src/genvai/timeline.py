@@ -25,15 +25,34 @@ class Frozen(BaseModel):
 # --------------------------------------------------------------------------- canvas
 
 
+class SafeArea(Frozen):
+    """Fractions of canvas height obscured by platform UI chrome.
+
+    On a vertical feed the top carries the status bar and the bottom carries the
+    caption, handle and action rail. Text placed outside these bounds is simply not
+    read. Defaults are sized for a 9:16 short-form feed; widen them per platform.
+    """
+
+    top: Unit = 0.10
+    bottom: Unit = 0.20
+    left: Unit = 0.05
+    right: Unit = 0.18
+
+
 class Canvas(Frozen):
     width: int = Field(default=1080, ge=16, le=4096, multiple_of=2)
     height: int = Field(default=1920, ge=16, le=4096, multiple_of=2)
     fps: int = Field(default=30, ge=1, le=120)
     background: str = "#000000"
+    safe_area: SafeArea = SafeArea()
 
     @property
     def aspect(self) -> float:
         return self.width / self.height
+
+    @property
+    def is_vertical(self) -> bool:
+        return self.height > self.width
 
 
 # --------------------------------------------------------------------------- visuals
@@ -158,12 +177,17 @@ Overlay = Annotated[TextOverlay | ImageOverlay, Field(discriminator="kind")]
 
 class TextStyle(Frozen):
     font: str = "Inter-SemiBold"
-    size_pct: float = Field(default=4.2, gt=0.0, le=30.0, description="Percent of canvas height.")
+    size_pct: float = Field(default=5.5, gt=0.0, le=30.0, description="Percent of canvas height.")
     color: str = "#FFFFFF"
     stroke_color: str = "#000000"
-    stroke_px: int = Field(default=3, ge=0, le=32)
-    max_chars_per_line: int = Field(default=24, ge=8, le=120)
+    stroke_px: int = Field(default=6, ge=0, le=32)
+    max_chars_per_line: int = Field(default=20, ge=8, le=120)
     line_spacing: float = 1.15
+    uppercase: bool = False
+
+    # Kinetic caption styling. Applies when Captions.mode is "word" or "line".
+    highlight_color: str = "#FFD400"
+    highlight_mode: Literal["color", "box", "scale"] = "color"
 
 
 # --------------------------------------------------------------------------- audio
@@ -230,10 +254,48 @@ class Music(Frozen):
         return self.state in ("none", "declined", "resolved")
 
 
+CaptionMode = Literal["static", "line", "word"]
+"""How captions animate.
+
+`static` shows the whole line for the scene. `line` swaps a line at a time.
+`word` highlights each word as it is spoken - the current short-form convention, and
+the cheapest large gain in perceived production value. All three are ASS subtitle
+features, so none needs a model.
+"""
+
+
 class Captions(Frozen):
     enabled: bool = True
+    mode: CaptionMode = "word"
     style_ref: str = "caption"
     source: Literal["narration", "transcript"] = "narration"
+
+
+# --------------------------------------------------------------------------- export
+
+AudioVariant = Literal["full", "narration_only", "silent"]
+"""Which audio bed an output carries.
+
+Not a convenience. Short-form feeds weight reach toward *attached* trending audio,
+and a track baked into the file is not an attached sound - it forfeits that signal
+and risks Content-ID muting besides. So the default is to emit a `narration_only`
+cut alongside the full mix: upload that one and attach the trending sound in the app.
+
+See docs/07-backlog.md for the reasoning and its limits.
+"""
+
+
+class Export(Frozen):
+    """What gets written out, and in what shape."""
+
+    audio_variants: tuple[AudioVariant, ...] = ("full", "narration_only")
+    seamless_loop: bool = Field(
+        default=False,
+        description=(
+            "Match the last frame to the first so the clip loops invisibly. "
+            "Re-watches count as watch time, so a clean loop is worth real reach."
+        ),
+    )
 
 
 # --------------------------------------------------------------------------- assets
@@ -265,9 +327,27 @@ class Asset(Frozen):
 # --------------------------------------------------------------------------- scene
 
 
+SceneRole = Literal["hook", "body", "payoff", "cta"]
+"""What a scene is for.
+
+Making this explicit forces the planner to write an opening deliberately rather than
+starting with scene one of an essay. Retention in short form is decided in the first
+couple of seconds, so `hook` is the single most consequential scene in the timeline.
+"""
+
+
 class Scene(Frozen):
     id: str
-    duration: Seconds = Field(default=4.0, ge=0.3, le=120.0)
+    duration: Seconds = Field(
+        default=2.2,
+        ge=0.3,
+        le=120.0,
+        description=(
+            "Short-form pacing runs roughly 1.5-2.5s per beat. The default targets that; "
+            "longer scenes are legitimate but should be chosen, not inherited."
+        ),
+    )
+    role: SceneRole = "body"
     visual: Visual
     motion: Motion = StillMotion()
     narration: Narration | None = None
@@ -286,9 +366,19 @@ class Timeline(Frozen):
     canvas: Canvas = Canvas()
     seed: int = Field(default=0, description="Seeds anything not explicitly seeded.")
 
+    style_suffix: str = Field(
+        default="",
+        description=(
+            "Appended to every generated image prompt. Holding one phrase constant "
+            "across scenes is the cheapest defence against each shot looking like it "
+            "came from a different video. A partial fix - see docs/07-backlog.md B3."
+        ),
+    )
+
     scenes: tuple[Scene, ...] = ()
     music: Music = Music()
     captions: Captions = Captions()
+    export: Export = Export()
     styles: dict[str, TextStyle] = Field(default_factory=lambda: {"caption": TextStyle()})
     assets: dict[str, Asset] = Field(default_factory=dict)
 
@@ -301,6 +391,16 @@ class Timeline(Frozen):
 
     def scene(self, scene_id: str) -> Scene | None:
         return next((s for s in self.scenes if s.id == scene_id), None)
+
+    @property
+    def hook(self) -> Scene | None:
+        """The opening beat, if the planner marked one."""
+        return next((s for s in self.scenes if s.role == "hook"), None)
+
+    @property
+    def mean_scene_duration(self) -> float:
+        """Average beat length. A quick read on whether the cut is paced for short form."""
+        return self.duration / len(self.scenes) if self.scenes else 0.0
 
     @property
     def unresolved_visuals(self) -> tuple[Scene, ...]:

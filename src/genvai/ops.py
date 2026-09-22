@@ -14,10 +14,13 @@ from pydantic import Field
 
 from genvai.timeline import (
     Canvas,
+    CaptionMode,
+    Export,
     Frozen,
     Motion,
     MusicQuery,
     Scene,
+    SceneRole,
     TextStyle,
     Timeline,
     Transition,
@@ -119,7 +122,32 @@ class SetCanvas(Frozen):
 class SetCaptions(Frozen):
     op: Literal["set_captions"] = "set_captions"
     enabled: bool
+    mode: CaptionMode | None = Field(default=None, description="None leaves the mode unchanged.")
     style_ref: str | None = None
+
+
+class SetSceneRole(Frozen):
+    """Retarget a scene - "make the third clip the hook"."""
+
+    op: Literal["set_scene_role"] = "set_scene_role"
+    scene_id: str
+    role: SceneRole
+
+
+class SetStyleSuffix(Frozen):
+    """Change the phrase appended to every image prompt.
+
+    Clears every unapproved generated visual, since the whole point is that they
+    re-render in a consistent look.
+    """
+
+    op: Literal["set_style_suffix"] = "set_style_suffix"
+    style_suffix: str
+
+
+class SetExport(Frozen):
+    op: Literal["set_export"] = "set_export"
+    export: Export
 
 
 class SetStyle(Frozen):
@@ -167,6 +195,9 @@ EditOp = Annotated[
     | ReorderScenes
     | SetCanvas
     | SetCaptions
+    | SetSceneRole
+    | SetStyleSuffix
+    | SetExport
     | SetStyle
     | SetMusicQuery
     | SelectMusicCandidate

@@ -11,7 +11,7 @@ from pathlib import Path
 
 from genvai.config import RenderSettings
 from genvai.ports import MediaInfo
-from genvai.timeline import Timeline
+from genvai.timeline import AudioVariant, Timeline
 
 
 def resolve_ffmpeg() -> Path:
@@ -38,8 +38,13 @@ class FFmpegRenderer:
         """Join segments, applying each scene's incoming transition."""
         raise NotImplementedError
 
-    def mix_audio(self, video: Path, timeline: Timeline, out: Path) -> Path:
-        """Lay narration and music over the cut, sidechain-ducking music under speech."""
+    def mix_audio(
+        self, video: Path, timeline: Timeline, out: Path, variant: AudioVariant = "full"
+    ) -> Path:
+        """Lay audio over the cut, sidechain-ducking music under speech.
+
+        `narration_only` skips the music input; `silent` muxes no audio stream.
+        """
         raise NotImplementedError
 
     def probe(self, media: Path) -> MediaInfo:

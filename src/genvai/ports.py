@@ -13,7 +13,14 @@ from typing import Protocol, TypeVar, runtime_checkable
 
 from pydantic import BaseModel
 
-from genvai.timeline import Asset, MusicCandidate, MusicQuery, Project, Timeline
+from genvai.timeline import (
+    Asset,
+    AudioVariant,
+    MusicCandidate,
+    MusicQuery,
+    Project,
+    Timeline,
+)
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -161,10 +168,15 @@ class RendererPort(Protocol):
         """Join rendered segments, applying transitions between them."""
         ...
 
-    def mix_audio(self, video: Path, timeline: Timeline, out: Path) -> Path:
-        """Lay narration and music over the cut, ducking music under speech.
+    def mix_audio(
+        self, video: Path, timeline: Timeline, out: Path, variant: AudioVariant = "full"
+    ) -> Path:
+        """Lay audio over the cut, ducking music under speech.
 
-        Separate from the video pass so an audio-only change skips re-encoding video.
+        `full` mixes narration and music, `narration_only` omits the music bed, and
+        `silent` writes no audio track at all. The variants are cheap - the video pass
+        is already done - and the narration-only cut is the one to upload when the
+        trending sound will be attached in-app.
         """
         ...
 

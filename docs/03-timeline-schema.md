@@ -12,13 +12,18 @@ All models are **frozen** (immutable). Mutation is impossible; transforms return
   "schema_version": 1,
   "version": 2,
   "intent": "30s vertical explainer on compound interest, calm, soft piano",
-  "canvas": { "width": 1080, "height": 1920, "fps": 30, "background": "#0B0E14" },
+  "canvas": {
+    "width": 1080, "height": 1920, "fps": 30, "background": "#0B0E14",
+    "safe_area": { "top": 0.10, "bottom": 0.20, "left": 0.05, "right": 0.18 }
+  },
   "seed": 20260922,
+  "style_suffix": "muted film grain, warm key light, shallow depth of field",
 
   "scenes": [
     {
       "id": "s1",
-      "duration": 4.5,
+      "duration": 2.4,
+      "role": "hook",
       "visual": {
         "kind": "generated",
         "prompt": "a single coin on a dark table, soft rim light, shallow depth of field",
@@ -57,12 +62,18 @@ All models are **frozen** (immutable). Mutation is impossible; transforms return
     "duck_under_narration": true
   },
 
-  "captions": { "enabled": true, "style_ref": "caption", "source": "narration" },
+  "captions": { "enabled": true, "mode": "word", "style_ref": "caption", "source": "narration" },
+
+  "export": {
+    "audio_variants": ["full", "narration_only"],
+    "seamless_loop": false
+  },
 
   "styles": {
     "caption": {
-      "font": "Inter-SemiBold", "size_pct": 4.2, "color": "#FFFFFF",
-      "stroke_color": "#000000", "stroke_px": 3, "max_chars_per_line": 24
+      "font": "Inter-SemiBold", "size_pct": 5.5, "color": "#FFFFFF",
+      "stroke_color": "#000000", "stroke_px": 6, "max_chars_per_line": 20,
+      "highlight_color": "#FFD400", "highlight_mode": "color", "uppercase": false
     }
   },
 
@@ -91,6 +102,18 @@ approved visual, even if the prompt changes; the LLM must explicitly unapprove i
 
 **Asset ids are content hashes.** Two scenes wanting the same image share one file.
 
+**`role`** makes the opening beat explicit. Retention in short form is decided in the
+first couple of seconds, so the planner is required to choose a `hook` rather than
+beginning with scene one of an essay.
+
+**`style_suffix`** is appended to every generated image prompt. Holding one phrase
+constant is the cheapest defence against each shot looking like a different video.
+It narrows drift; it does not eliminate it (docs/07-backlog.md B2).
+
+**`safe_area`** marks the fractions of the canvas covered by platform UI. Text placed
+outside those bounds is not read, so the renderer treats it as a hard constraint on
+overlay and caption placement.
+
 ## Music state machine
 
 This encodes the rule that nothing is downloaded without consent.
@@ -116,6 +139,21 @@ Any other state is a hard error - it means the pipeline tried to render before t
 user was asked. **There is no path from `suggested` to a downloaded file that skips
 `approved`.**
 
+## Export variants
+
+A short-form feed weights reach toward *attached* trending audio. A track baked into
+the file is not an attached sound: it forfeits that signal and risks Content-ID
+muting. So the default emits two cuts from one video pass:
+
+| Variant | Use |
+| --- | --- |
+| `full` | Narration and music mixed. Good for platforms without an in-app sound library. |
+| `narration_only` | Upload this where a trending sound will be attached in the app. |
+| `silent` | Video only, for adding a full audio bed elsewhere. |
+
+The variants share the video render and differ only in the audio mux, so the extra
+outputs are close to free.
+
 ## Edit operations
 
 On a change request the LLM returns `{"ops": [...]}` against this closed vocabulary.
@@ -139,7 +177,10 @@ by pydantic; an unknown `op` value is rejected outright.
 | `select_music_candidate` | `candidate_id` | Moves to `approved` (still requires the download confirmation) |
 | `remove_music` | - | Moves to `declined` |
 | `set_music_gain` | `gain_db` | Louder/quieter bed |
-| `set_captions` | `enabled`, `style_ref?` | Toggle burn-in |
+| `set_captions` | `enabled`, `mode?`, `style_ref?` | Toggle burn-in, or switch to word-level |
+| `set_scene_role` | `scene_id`, `role` | Retarget a beat, e.g. promote one to `hook` |
+| `set_style_suffix` | `style_suffix` | Restyle every generated visual at once |
+| `set_export` | `export` | Change output variants or the loop flag |
 | `set_style` | `style_ref`, `patch` | Font, size, colour |
 
 ### Validation rules

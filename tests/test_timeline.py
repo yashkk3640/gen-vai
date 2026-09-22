@@ -7,8 +7,11 @@ from pydantic import ValidationError
 
 from genvai.timeline import (
     Canvas,
+    Captions,
+    Export,
     GeneratedVisual,
     Music,
+    SafeArea,
     Scene,
     Timeline,
     Transition,
@@ -101,3 +104,70 @@ def test_roundtrips_through_json() -> None:
         intent="test", scenes=(_scene("s1"),), canvas=Canvas(width=1920, height=1080)
     )
     assert Timeline.model_validate_json(timeline.model_dump_json()) == timeline
+
+
+# --------------------------------------------------------------- short-form contract
+
+
+def test_default_pacing_targets_short_form() -> None:
+    """A default beat should be short-form length, not essay length."""
+    assert 1.5 <= Scene(id="s1", visual=GeneratedVisual(prompt="x")).duration <= 2.5
+
+
+def test_hook_is_discoverable() -> None:
+    timeline = Timeline(
+        intent="test",
+        scenes=(
+            Scene(id="s1", role="hook", visual=GeneratedVisual(prompt="x")),
+            Scene(id="s2", visual=GeneratedVisual(prompt="y")),
+        ),
+    )
+    assert timeline.hook is not None
+    assert timeline.hook.id == "s1"
+
+
+def test_hook_is_none_when_unmarked() -> None:
+    """Planning that never chose an opening is visible rather than silently fine."""
+    assert Timeline(intent="test", scenes=(_scene("s1"),)).hook is None
+
+
+def test_scenes_default_to_body_role() -> None:
+    assert Scene(id="s1", visual=GeneratedVisual(prompt="x")).role == "body"
+
+
+def test_mean_scene_duration_reports_pacing() -> None:
+    timeline = Timeline(intent="test", scenes=(_scene("s1", 2.0), _scene("s2", 3.0)))
+    assert timeline.mean_scene_duration == pytest.approx(2.5)
+
+
+def test_mean_scene_duration_is_zero_when_empty() -> None:
+    assert Timeline(intent="test").mean_scene_duration == 0.0
+
+
+def test_captions_default_to_word_level() -> None:
+    """Kinetic captions are the short-form convention, so they are the default."""
+    assert Captions().mode == "word"
+
+
+def test_export_emits_a_narration_only_cut_by_default() -> None:
+    """The cut to upload when a trending sound is attached in-app. See docs D4 / B4."""
+    assert "narration_only" in Export().audio_variants
+
+
+def test_export_does_not_loop_by_default() -> None:
+    assert Export().seamless_loop is False
+
+
+def test_safe_area_leaves_a_usable_band() -> None:
+    """Top and bottom insets must not consume the whole frame."""
+    area = SafeArea()
+    assert area.top + area.bottom < 1.0
+
+
+def test_style_suffix_defaults_to_empty() -> None:
+    assert Timeline(intent="test").style_suffix == ""
+
+
+def test_canvas_orientation() -> None:
+    assert Canvas().is_vertical
+    assert not Canvas(width=1920, height=1080).is_vertical

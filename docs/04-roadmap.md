@@ -4,6 +4,11 @@
 
 **Milestone 0 complete: documentation, portable environment, typed scaffold.**
 
+The schema has since had a short-form pass: pacing defaults, scene roles, kinetic
+captions, export variants and safe areas were folded into the contract before any
+renderer existed, because adding them after M1 would have meant reworking the
+filtergraph. What could not be folded in is parked in [07-backlog.md](07-backlog.md).
+
 Nothing renders yet. Every adapter is a stub that raises `NotImplementedError`.
 This is deliberate - the schema and the port boundary were agreed before any
 implementation, so implementation does not thrash.
@@ -25,6 +30,9 @@ Deliberately before the LLM. A hand-written timeline JSON renders to MP4 using
 procedural cards and Ken Burns motion.
 
 - ffmpeg adapter: per-scene segment, `zoompan`, transitions, concat
+- ASS subtitle generation for word-level kinetic captions
+- audio variants: one video pass, separate muxes for `full` / `narration_only` / `silent`
+- safe-area-aware overlay placement
 - procedural image provider: gradient + typography
 - filesystem store; content-addressed assets
 - fingerprint-based segment cache
@@ -91,7 +99,12 @@ upscale with ffmpeg `lanczos`. Procedural fallback stays available throughout.
 
 ## Known open questions
 
-1. **Small-model JSON reliability** - decides whether M2 needs the two-step fallback.
-2. **Scene/narration timing** - stretch the scene, speed the speech, or trim the text? Leaning stretch-the-scene; it is the least destructive.
-3. **Music source** - which CC library to integrate first, and whether to ship a small bundled set so M5 works fully offline.
-4. **Preview loop** - is a proxy render fast enough for iteration, or is a frame-accurate still preview needed for the edit loop to feel conversational?
+1. **Should Mode C outrank Mode A?** For competitive short-form output on 4 GB,
+   editing real footage sidesteps the image-fidelity ceiling entirely and leaves the
+   LLM doing what it is best at. That argues for moving M7 to M2. It is a product
+   call, not a technical one, so it is recorded rather than assumed
+   ([07-backlog.md](07-backlog.md) B5).
+2. **Small-model JSON reliability** - decides whether M2 needs the two-step fallback.
+3. **Scene/narration timing** - stretch the scene, speed the speech, or trim the text? Leaning stretch-the-scene; it is the least destructive.
+4. **Music source** - which CC library to integrate first, and whether to ship a small bundled set so M5 works fully offline.
+5. **Preview loop** - is a proxy render fast enough for iteration, or is a frame-accurate still preview needed for the edit loop to feel conversational?
