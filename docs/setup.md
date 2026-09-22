@@ -30,11 +30,19 @@ Without them you get procedural visuals and silent audio. Nothing breaks.
 
 ```bash
 ollama serve
-ollama pull qwen2.5:7b-instruct    # ~4.7 GB, good structured output
+ollama pull llama3.2       # ~2 GB, the default
 ```
 
-A 7B Q4 model fits 4 GB VRAM. Tighter machines can use `qwen2.5:3b-instruct`. Point at
-something else by copying `.env.example` to `.env` and setting `GENVAI_LLM__MODEL`.
+Model size matters more than you would expect on a 4 GB card, and these are measured
+rather than guessed:
+
+| Model | Warm request | Verdict |
+| --- | --- | --- |
+| `llama3.2` (3B) | ~12s | fits in VRAM; the default |
+| 9B-class | >180s, times out | spills to CPU, unusable here |
+
+Bigger is better where there is VRAM for it. Point at something else by copying
+`.env.example` to `.env` and setting `GENVAI_LLM__MODEL`.
 
 ## Another machine
 

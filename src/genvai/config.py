@@ -13,15 +13,23 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class LLMSettings(BaseModel):
     base_url: str = "http://localhost:11434"
-    model: str = "qwen2.5:7b-instruct"
-    timeout_s: float = 120.0
+    model: str = Field(
+        default="llama3.2",
+        description=(
+            "A 3B model, chosen because it fits 4 GB entirely. A 9B spills to CPU and "
+            "takes minutes per request - measured, not assumed. Larger is better where "
+            "there is VRAM for it."
+        ),
+    )
+    timeout_s: float = 180.0
     temperature: float = 0.4
     max_retries: int = Field(default=3, description="Retries on schema-invalid output.")
     keep_alive: str = Field(
-        default="0s",
+        default="5m",
         description=(
-            "Ollama unload delay. Defaults to immediate release so the GPU is free "
-            "for the diffusion model; see docs/architecture.md."
+            "How long Ollama holds the model in memory between calls. Reloading costs "
+            "about ten seconds per call on a 4 GB card, which dominates a short "
+            "planning request. The phase boundary calls unload() explicitly instead."
         ),
     )
 
