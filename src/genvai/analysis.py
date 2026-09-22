@@ -14,6 +14,9 @@ from collections.abc import Sequence
 import numpy as np
 from numpy.typing import NDArray
 
+from genvai.media import Span
+from genvai.timeline import Frozen
+
 Frame = NDArray[np.float64]
 """A greyscale frame, 0-255."""
 
@@ -120,3 +123,143 @@ def _saturate(value: float, midpoint: float) -> float:
     if value <= 0.0 or midpoint <= 0.0:
         return 0.0
     return float(value / (value + midpoint))
+
+
+# --------------------------------------------------------------------------- spans
+
+
+class FrameScore(Frozen):
+    """One sampled frame's measurements, with the time it was taken from."""
+
+    at: float
+    sharpness: float
+    exposure: float
+    motion: float
+
+
+SHARPNESS_WEIGHT = 0.55
+EXPOSURE_WEIGHT = 0.30
+MOTION_WEIGHT = 0.15
+
+HIGH_MOTION = 0.55
+"""Above this, movement stops reading as life and starts reading as a whip pan."""
+
+EDGE_SECONDS = 0.6
+"""How much of a clip's head and tail to treat as suspect.
+
+Phone clips are shakiest while a thumb is still on the button, and the last moment is
+usually the hand travelling to stop the recording. Both ends are penalised rather than
+cut outright, so a short clip that is *all* edge can still contribute.
+"""
+
+SHAKE_PENALTY = 0.35
+
+
+def frame_score(sample: FrameScore) -> float:
+    """How usable one frame is, 0-1.
+
+    Focus dominates, because nothing rescues a blurred frame. Exposure is scored by
+    distance from the middle rather than by brightness, so an overexposed frame loses as
+    much as a crushed one. Motion only subtracts, and only when it is high enough to
+    smear - a still moment is a perfectly good shot.
+    """
+    exposure_fit = max(0.0, 1.0 - abs(sample.exposure - 0.5) * 1.8)
+    motion_fit = (
+        1.0 if sample.motion <= HIGH_MOTION else max(0.0, 1.0 - (sample.motion - HIGH_MOTION) * 2.5)
+    )
+    return (
+        SHARPNESS_WEIGHT * sample.sharpness
+        + EXPOSURE_WEIGHT * exposure_fit
+        + MOTION_WEIGHT * motion_fit
+    )
+
+
+def find_spans(
+    samples: Sequence[FrameScore],
+    *,
+    duration: float,
+    target: float = 2.2,
+    max_spans: int = 3,
+    minimum: float = 0.8,
+) -> tuple[Span, ...]:
+    """Find the best few stretches of a clip, best first.
+
+    This is where most of the value of camera-roll editing sits: a twenty-second phone
+    clip usually holds two seconds worth keeping, and finding them by hand forty times
+    over is the job people give up on.
+
+    Returns several candidates rather than one, so selection can take a different span
+    when the best one collides with something already chosen.
+    """
+    if len(samples) < 2 or duration <= 0.0:
+        return ()
+
+    window = max(2, round(target / _spacing(samples)))
+    if window > len(samples):
+        # A clip shorter than the target beat: offer the whole thing.
+        score = sum(frame_score(s) for s in samples) / len(samples)
+        return (Span(start=0.0, end=duration, score=_clamp(score), reason=_reason(samples)),)
+
+    scored = [
+        (_window_score(samples[i : i + window], duration), i)
+        for i in range(len(samples) - window + 1)
+    ]
+    scored.sort(key=lambda pair: pair[0], reverse=True)
+
+    chosen: list[Span] = []
+    taken: list[tuple[float, float]] = []
+    for score, index in scored:
+        block = samples[index : index + window]
+        start, end = block[0].at, min(duration, block[-1].at)
+        if end - start < minimum or any(_overlaps((start, end), r) for r in taken):
+            continue
+        chosen.append(Span(start=start, end=end, score=_clamp(score), reason=_reason(block)))
+        taken.append((start, end))
+        if len(chosen) == max_spans:
+            break
+    return tuple(chosen)
+
+
+def _window_score(block: Sequence[FrameScore], duration: float) -> float:
+    """Mean frame quality, penalised for jitter and for sitting at the clip's edge."""
+    base = sum(frame_score(s) for s in block) / len(block)
+    steadiness = 1.0 - SHAKE_PENALTY * shake([s.motion for s in block])
+    return base * steadiness * _edge_taper(block[0].at, block[-1].at, duration)
+
+
+def _edge_taper(start: float, end: float, duration: float) -> float:
+    """Scale down windows that reach into the suspect head or tail of a clip."""
+    head = min(1.0, start / EDGE_SECONDS) if EDGE_SECONDS > 0 else 1.0
+    tail = min(1.0, (duration - end) / EDGE_SECONDS) if EDGE_SECONDS > 0 else 1.0
+    return 0.7 + 0.3 * min(head, tail)
+
+
+def _reason(block: Sequence[FrameScore]) -> str:
+    """A short, honest explanation. The user sees this when asking why a clip was used."""
+    focus = sum(s.sharpness for s in block) / len(block)
+    movement = sum(s.motion for s in block) / len(block)
+    jitter = shake([s.motion for s in block])
+
+    parts = ["sharp" if focus > 0.5 else "soft focus"]
+    if jitter > 0.5:
+        parts.append("unsteady")
+    elif movement > HIGH_MOTION:
+        parts.append("fast movement")
+    elif movement > 0.15:
+        parts.append("some movement")
+    else:
+        parts.append("steady")
+    return ", ".join(parts)
+
+
+def _spacing(samples: Sequence[FrameScore]) -> float:
+    gaps = [b.at - a.at for a, b in zip(samples, samples[1:], strict=False) if b.at > a.at]
+    return sum(gaps) / len(gaps) if gaps else 1.0
+
+
+def _overlaps(a: tuple[float, float], b: tuple[float, float]) -> bool:
+    return a[0] < b[1] and b[0] < a[1]
+
+
+def _clamp(value: float) -> float:
+    return float(min(1.0, max(0.0, value)))
