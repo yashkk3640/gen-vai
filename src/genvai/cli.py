@@ -14,7 +14,12 @@ from rich.console import Console
 from rich.table import Table
 
 from genvai import __version__
+from genvai.adapters.ffmpeg import FFmpegRenderer
+from genvai.adapters.fs_store import FilesystemStore
 from genvai.config import load_settings
+from genvai.errors import GenvaiError, RenderError
+from genvai.pipeline.render import plan_render
+from genvai.pipeline.render import render as render_timeline
 
 app = typer.Typer(
     name="genvai",
@@ -123,15 +128,69 @@ def render(
     project: str = typer.Argument(..., help="Project id."),
     version: int | None = typer.Option(None, "--version", help="Defaults to current."),
     preview: bool = typer.Option(False, "--preview", help="Fast low-resolution proxy."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Report the work, encode nothing."),
 ) -> None:
-    """Render a timeline to MP4."""
-    _not_yet("render", "M1")
+    """Render a timeline to MP4.
+
+    Only scenes whose content changed are re-encoded, so re-rendering after an edit
+    costs a fraction of the first pass.
+    """
+    settings = load_settings()
+    store = FilesystemStore(settings.projects_dir)
+    try:
+        timeline = store.load_timeline(project, version)
+    except GenvaiError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from exc
+
+    plan = plan_render(timeline, project, store)
+    console.print(
+        f"[bold]{project}[/bold] v{timeline.version}  "
+        f"{timeline.duration:.1f}s  {len(timeline.scenes)} scenes  "
+        f"{timeline.canvas.width}x{timeline.canvas.height}  -  {plan.summary()}"
+    )
+    if dry_run:
+        return
+
+    renderer = FFmpegRenderer(settings.render, lambda asset_id: store.asset_path(project, asset_id))
+    try:
+        outputs = render_timeline(timeline, project, renderer, store, preview=preview)
+    except GenvaiError as exc:
+        console.print(f"[red]{exc}[/red]")
+        if isinstance(exc, RenderError) and exc.stderr:
+            console.print(f"[dim]{exc.stderr}[/dim]")
+        raise typer.Exit(code=1) from exc
+
+    for variant, path in outputs.items():
+        console.print(f"  [green]{variant}[/green]  {path}")
+    if "narration_only" in outputs:
+        console.print()
+        console.print(
+            "[dim]Upload the narration_only cut when you plan to attach a trending "
+            "sound in the app - a baked-in track forfeits that reach.[/dim]"
+        )
 
 
 @app.command(name="list")
 def list_projects() -> None:
     """List projects."""
-    _not_yet("list", "M1")
+    settings = load_settings()
+    projects = FilesystemStore(settings.projects_dir).list_projects()
+    if not projects:
+        console.print(
+            f"[dim]No projects under {settings.projects_dir.resolve()}. "
+            "Start one with 'genvai add <name> <files...>'.[/dim]"
+        )
+        return
+
+    table = Table(show_header=True, header_style="bold")
+    table.add_column("Project")
+    table.add_column("Version", justify="right")
+    table.add_column("Updated")
+    table.add_column("Intent", overflow="fold")
+    for item in projects:
+        table.add_row(item.id, str(item.current_version), item.updated_at, item.intent)
+    console.print(table)
 
 
 @app.command()

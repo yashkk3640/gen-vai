@@ -28,14 +28,17 @@ being a constraint. See [docs/00-vision.md](docs/00-vision.md).
 
 ## Status
 
-**Milestone 0** - documentation, portable environment, and typed scaffold.
-Nothing renders yet; adapters are stubs. See [docs/04-roadmap.md](docs/04-roadmap.md).
+**M1 complete - timelines render.** The ffmpeg adapter, filesystem store and
+incremental segment cache all work against real media; `genvai render` produces MP4s.
+Ingest, selection and the LLM are next. See [docs/04-roadmap.md](docs/04-roadmap.md).
 
 ## Quick start
 
 ```bash
 uv sync
-uv run genvai doctor      # reports what is available on this machine
+uv run genvai doctor          # reports what is available on this machine
+uv run genvai list            # projects
+uv run genvai render <id>     # render a timeline to MP4
 ```
 
 Full setup, optional extras, and how to move the project to another system:

@@ -9,13 +9,14 @@ should be readable in one sitting. See 'Ports and adapters' in docs/06-decisions
 """
 
 from pathlib import Path
-from typing import Protocol, TypeVar, runtime_checkable
+from typing import Literal, Protocol, TypeVar, runtime_checkable
 
 from pydantic import BaseModel
 
 from genvai.media import MediaItem, MediaLibrary
 from genvai.timeline import (
     Asset,
+    AssetProvenance,
     AudioVariant,
     BeatMap,
     MusicCandidate,
@@ -228,8 +229,14 @@ class RendererPort(Protocol):
         """Render one scene to a segment, for the fingerprint cache."""
         ...
 
-    def concat(self, segments: tuple[Path, ...], out: Path) -> Path:
-        """Join rendered segments, applying transitions between them."""
+    def concat_with(
+        self, segments: tuple[Path, ...], transitions: tuple[tuple[str, float], ...], out: Path
+    ) -> Path:
+        """Join rendered segments, applying each scene's incoming transition.
+
+        `transitions[i]` describes how `segments[i + 1]` enters. An all-cut timeline
+        stream-copies; anything else cross-fades and therefore re-encodes.
+        """
         ...
 
     def mix_audio(
@@ -259,7 +266,7 @@ class MediaInfo(BaseModel):
 class ProjectStore(Protocol):
     """Persistence. A project is a directory; see docs/02-architecture.md."""
 
-    def create(self, intent: str) -> Project: ...
+    def create(self, intent: str, project_id: str | None = None) -> Project: ...
 
     def load(self, project_id: str) -> Project:
         """Raises `ProjectNotFound` if it does not exist."""
@@ -277,10 +284,17 @@ class ProjectStore(Protocol):
 
     def versions(self, project_id: str) -> tuple[int, ...]: ...
 
-    def store_asset(self, project_id: str, source: Path, asset: Asset) -> Asset:
-        """Move a file into the project, addressed by content hash.
+    def store_asset(
+        self,
+        project_id: str,
+        source: Path,
+        kind: Literal["image", "audio", "video"],
+        provenance: AssetProvenance,
+    ) -> Asset:
+        """Copy a file into the project, addressed by content hash.
 
-        Idempotent: storing identical content twice yields one file.
+        Returns the stored Asset with its path and digest filled in. Idempotent:
+        storing identical content twice yields one file.
         """
         ...
 
@@ -297,3 +311,9 @@ class ProjectStore(Protocol):
     def load_media(self, project_id: str) -> MediaLibrary: ...
 
     def project_dir(self, project_id: str) -> Path: ...
+
+    def segment_cache_dir(self, project_id: str) -> Path:
+        """Where fingerprinted scene segments live. Created on demand."""
+        ...
+
+    def renders_dir(self, project_id: str) -> Path: ...

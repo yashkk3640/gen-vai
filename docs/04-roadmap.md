@@ -9,37 +9,55 @@ captions, export variants and safe areas were folded into the contract before an
 renderer existed, because adding them after M1 would have meant reworking the
 filtergraph. What could not be folded in is parked in [07-backlog.md](07-backlog.md).
 
-Nothing renders yet. Every adapter is a stub that raises `NotImplementedError`.
-This is deliberate - the schema and the port boundary were agreed before any
-implementation, so implementation does not thrash.
+**M1 is complete: timelines render.** The store, fingerprint cache, ffmpeg adapter
+and `genvai render` all work against real media. Ingest, selection and the LLM are
+still stubs.
 
 | | Milestone | State |
 | --- | --- | --- |
 | M0 | Docs, env, ports, timeline and media schemas | **done** |
-| M1 | Render path: timeline -> MP4, trims and crops included | next |
-| M2 | Ingest and analysis: camera roll -> media.json | |
+| M1 | Render path: timeline -> MP4, trims and crops included | **done** |
+| M2 | Ingest and analysis: camera roll -> media.json | next |
 | M3 | Selection and assembly: library + intent -> timeline | |
 | M4 | Conversational edit loop + incremental re-render | |
 | M5 | Music, beat detection, beat-aligned cuts | |
 | M6 | Auto-reframe: keep the subject in frame when cropping to 9:16 | |
 | M7 | Idea mode: generated visuals and narration | parked |
 
-## M1 - Render path first
+## M1 - Render path - **done**
 
-A hand-written timeline renders to MP4. Deliberately before any analysis or LLM work,
-because everything downstream produces timelines and nothing can be checked until one
-can be played.
+A timeline renders to MP4. Built before any analysis or LLM work, because everything
+downstream produces timelines and nothing could be checked until one could be played.
 
-- ffmpeg adapter: trim a clip span, crop/fit to canvas, speed change, concat
-- photos: Ken Burns motion; clips: straight playback within the trim
-- ASS subtitle generation for word-level kinetic captions
-- audio variants: one video pass, separate muxes for full / narration_only / silent
-- safe-area-aware overlay placement
-- filesystem store; content-addressed assets
-- fingerprint-based segment cache
+Delivered:
 
-*Done when:* a committed sample timeline mixing photos and trimmed clips renders to a
-correct MP4 on a clean clone, and changing one scene re-encodes exactly one segment.
+- ffmpeg adapter: clip trim by input seek, crop, cover/contain fit, speed change with
+  audio retimed to match, Ken Burns over stills via `zoompan`, text overlays placed
+  inside the canvas safe area
+- joining: concat demuxer with a stream copy when every transition is a cut, `xfade`
+  chain when it is not
+- audio variants from one video pass - full, narration_only, silent
+- filesystem store: content-addressed assets, append-only timeline history
+- fingerprint segment cache, and `genvai render --dry-run` to report the work first
+- `genvai render` and `genvai list`
+
+Two bugs worth recording, because both were invisible in the command string and only
+showed up in the pixels:
+
+1. **Inline `text=` in a filtergraph is unusable.** Colons, quotes and newlines all mean
+   something to the parser, so a wrapped caption rendered its line break as a literal
+   "n". Text now goes through `textfile=`, which has no escaping problems and handles
+   Unicode.
+2. **`Path.write_text` produces CRLF on Windows**, and drawtext renders the stray
+   carriage return as extra leading - tripling the gap between wrapped lines. The same
+   code looks correct on Linux. The newline is now pinned explicitly.
+
+Known gaps, deliberately not in scope:
+
+- `blur_pad` fit is approximated as `cover`; the split/overlay graph is not built yet
+- image overlays (watermark, logo) are parsed but not drawn - they need a second input
+- captions are not burned from narration yet; word-level timing needs real audio, which
+  arrives with TTS in M5. Text overlays cover the fixed-text case today
 
 ## M2 - Ingest and analysis
 
