@@ -21,7 +21,7 @@ uv run genvai doctor
 
 `doctor` reports what your machine has. Anything missing degrades gracefully rather than
 breaking. For the LLM features, install [Ollama](https://ollama.com) and
-`ollama pull qwen2.5:7b-instruct`.
+`ollama pull llama3.2`.
 
 ## Use
 
@@ -42,7 +42,7 @@ genvai create "why compound interest matters" -d 20   # no footage needed
 | `render` | Timeline → MP4. `--preview` for a fast proxy, `--dry-run` to see the work | yes |
 | `add` | Import and analyse media | yes |
 | `media` | Show what was found, with scores | yes |
-| `reel` | Build a reel � picks, trims, orders, captions | yes |
+| `reel` | Build a reel — picks, trims, orders, captions | yes |
 | `edit` | Change it in plain English, with a diff first | yes |
 | `restore` | Put back an earlier version | yes |
 | `music` | Suggest a track, approve one, align cuts to its beat | yes |
@@ -51,9 +51,23 @@ genvai create "why compound interest matters" -d 20   # no footage needed
 A project is a plain folder under `projects/`. Open it and you can see every asset, every
 version of the edit, and every render. Copy it to another machine and it still works.
 
+## Worth knowing before you trust it
+
+- **Captions are invented, not observed.** The model never sees your pictures, only
+  measurements, so it writes plausible copy from your `--intent`. Ask for "a weekend by
+  the sea" and you may get "seagulls soar" whether or not there is one.
+- **Avoid `genvai edit --yes`.** A small model occasionally adds a command you did not
+  ask for; the diff it prints before applying is the safeguard.
+- **Use a 3B model.** A 9B one spills off a 4 GB card and times out - measurements in
+  [docs/setup.md](docs/setup.md).
+- **Bring your own music.** Nothing ships with the project.
+
+Fuller list in [TODO.md](TODO.md).
+
 ## Status
 
-**M1 done** — timelines render. Ingest and selection are next. See [TODO.md](TODO.md).
+**All eight milestones are done** — import, select, reframe, beat-align, render,
+edit, undo, and idea mode. What is left is refinement; see [TODO.md](TODO.md).
 
 ## Docs
 

@@ -35,7 +35,7 @@ Nothing knows whether a video performed. Everything above is a prior, never a
 measurement. A minimal version — paste back view figures, let the planner weight its
 choices — would turn assumptions into something that learns.
 
-### Face-aware reframing � *partly done*
+### Face-aware reframing — *partly done*
 
 Reframing works: detail-density saliency finds the subject and crops around it, moving
 the crop when the subject travels. What it does not do is know a face from a shirt.
