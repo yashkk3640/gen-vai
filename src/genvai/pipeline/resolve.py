@@ -1,11 +1,12 @@
-"""Fill unresolved asset slots: generate images, synthesise narration, settle music.
+"""Filling in what a plan only described: generating the images a storyboard asks for.
 
-Runs after the LLM is unloaded. Every provider may be unavailable; the resolver
-degrades to a fallback and reports it rather than aborting the run.
+Runs after the LLM is unloaded, because at 4 GB a text model and an image model cannot
+share the card. Every provider may be unavailable, and the resolver degrades rather than
+aborting - a video made of designed backdrops is a video; an exception is not.
 """
 
 from genvai.ports import ImageProvider, MusicProvider, ProjectStore, SpeechProvider
-from genvai.timeline import Timeline
+from genvai.timeline import AssetProvenance, GeneratedVisual, Scene, Timeline
 
 
 def resolve_visuals(
@@ -14,13 +15,48 @@ def resolve_visuals(
     images: ImageProvider,
     store: ProjectStore,
 ) -> Timeline:
-    """Generate one image per unresolved scene and attach the asset.
+    """Generate an image for every unresolved scene and attach it as an asset.
 
     Approved visuals are skipped even if their prompt changed - a visual the user
-    blessed is never silently replaced. Falls back to a procedural card when
-    `images.is_available()` is False.
+    blessed is never silently replaced.
+
+    Each image is stored by content hash, so two scenes asking for the same thing at the
+    same seed share one file, and re-resolving an unchanged timeline costs nothing.
     """
-    raise NotImplementedError
+    if not timeline.unresolved_visuals:
+        return timeline
+
+    scenes: list[Scene] = []
+    assets = dict(timeline.assets)
+
+    for scene in timeline.scenes:
+        visual = scene.visual
+        if not isinstance(visual, GeneratedVisual) or visual.asset_id is not None:
+            scenes.append(scene)
+            continue
+
+        seed = visual.seed if visual.seed is not None else timeline.seed
+        path = images.generate(
+            visual.prompt,
+            width=timeline.canvas.width,
+            height=timeline.canvas.height,
+            seed=seed,
+            negative_prompt=visual.negative_prompt,
+        )
+        asset = store.store_asset(
+            project_id,
+            path,
+            "image",
+            AssetProvenance(provider=images.name, seed=seed, prompt=visual.prompt),
+        )
+        assets[asset.sha256] = asset
+        scenes.append(
+            scene.model_copy(
+                update={"visual": visual.model_copy(update={"asset_id": asset.sha256})}
+            )
+        )
+
+    return timeline.model_copy(update={"scenes": tuple(scenes), "assets": assets})
 
 
 def resolve_narration(
@@ -32,7 +68,7 @@ def resolve_narration(
     """Synthesise each narration line and reconcile scene durations against it.
 
     Scenes stretch to fit their audio rather than truncating speech - the least
-    destructive of the options, though see the open question in TODO.md.
+    destructive option, and the one that keeps a sentence from being cut off mid-word.
     """
     raise NotImplementedError
 
@@ -40,8 +76,8 @@ def resolve_narration(
 def suggest_music(timeline: Timeline, music: MusicProvider) -> Timeline:
     """Search for candidates and move the state to `candidates_ready`.
 
-    Read-only: this never downloads. Presenting the options and taking the user's
-    choice is the caller's job.
+    Superseded by `genvai.pipeline.music.suggest`, which also persists. Kept as the port
+    boundary it always was.
     """
     raise NotImplementedError
 
@@ -54,9 +90,5 @@ def fetch_approved_music(
     *,
     confirmed: bool,
 ) -> Timeline:
-    """Download the selected track and record its licence.
-
-    Requires `state == "approved"` and `confirmed is True`; raises
-    `ConfirmationRequired` otherwise. See 'Music consent' in docs/decisions.md.
-    """
+    """Superseded by `genvai.pipeline.music.approve`."""
     raise NotImplementedError

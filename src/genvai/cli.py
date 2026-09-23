@@ -20,6 +20,7 @@ from genvai.adapters.analyzer import FrameAnalyzer
 from genvai.adapters.beat import FFmpegBeatDetector
 from genvai.adapters.ffmpeg import FFmpegRenderer, resolve_ffmpeg
 from genvai.adapters.fs_store import FilesystemStore
+from genvai.adapters.images import image_provider
 from genvai.adapters.music_local import LocalMusicProvider
 from genvai.adapters.ollama import OllamaLLM
 from genvai.config import load_settings
@@ -29,8 +30,10 @@ from genvai.pipeline.ingest import ingest, summarise
 from genvai.pipeline.music import approve as approve_music
 from genvai.pipeline.music import decline as decline_music
 from genvai.pipeline.music import suggest as suggest_music
+from genvai.pipeline.plan import plan as plan_idea
 from genvai.pipeline.render import plan_render
 from genvai.pipeline.render import render as render_timeline
+from genvai.pipeline.resolve import resolve_visuals
 from genvai.pipeline.select import make_reel
 from genvai.timeline import Canvas
 
@@ -214,11 +217,69 @@ def media(
 @app.command()
 def create(
     intent: str = typer.Argument(..., help="What the video should be."),
+    name: str = typer.Option("", "--name", help="Project id. Defaults to a slug of the idea."),
+    duration: float = typer.Option(20.0, "--duration", "-d", help="Target length in seconds."),
     aspect: str = typer.Option("9:16", "--aspect", help="9:16, 16:9 or 1:1."),
     seed: int = typer.Option(0, "--seed", help="0 picks a random seed and records it."),
 ) -> None:
-    """Idea mode: generate from a description, no footage. Parked - see roadmap."""
-    _not_yet("create", "M7")
+    """Idea mode: make a video from a description, with no footage at all.
+
+    Every frame is generated. The weakest thing this does - real footage beats it every
+    time - but it works when there is no camera roll to work from.
+    """
+    settings = load_settings()
+    store = FilesystemStore(settings.projects_dir)
+    project = store.create(intent, name or None)
+
+    llm: OllamaLLM | None = OllamaLLM(settings.llm)
+    if llm is not None and not llm.is_available():
+        console.print(
+            f"[yellow]{settings.llm.model} not available[/yellow] - writing the beats "
+            "from your own words instead."
+        )
+        llm = None
+
+    images = image_provider(
+        settings.image,
+        store.project_dir(project.id) / "cache" / "images",
+        on_note=lambda note: console.print(f"[yellow]{note}[/yellow]"),
+    )
+    try:
+        timeline = plan_idea(
+            intent,
+            llm,
+            target_duration=duration,
+            canvas=_canvas_for(aspect),
+            seed=seed or _random_seed(),
+        )
+        # The text model is released before any image model loads; at 4 GB they cannot
+        # share the card. See 'Phase-ordered model loading' in docs/decisions.md.
+        if llm is not None:
+            llm.unload()
+        timeline = resolve_visuals(timeline, project.id, images, store)
+        store.save_timeline(project.id, timeline)
+    except GenvaiError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from exc
+
+    console.print(
+        f"[bold]{project.id}[/bold] v{timeline.version}  "
+        f"{len(timeline.scenes)} beats  {timeline.duration:.1f}s  ({images.name} visuals)"
+    )
+    renderer = FFmpegRenderer(
+        settings.render, lambda asset_id: store.asset_path(project.id, asset_id)
+    )
+    try:
+        outputs = render_timeline(timeline, project.id, renderer, store)
+    except GenvaiError as exc:
+        console.print(f"[red]{exc}[/red]")
+        if isinstance(exc, RenderError) and exc.stderr:
+            console.print(f"[dim]{exc.stderr}[/dim]")
+        raise typer.Exit(code=1) from exc
+
+    for variant, path in outputs.items():
+        console.print(f"  [green]{variant}[/green]  {path}")
+    console.print(f'[dim]Change it with: genvai edit {project.id} "..."[/dim]')
 
 
 @app.command()

@@ -31,6 +31,8 @@ genvai reel trip --duration 30          # pick, trim, sequence, caption
 genvai music trip --mood "calm piano"   # suggest tracks (downloads nothing)
 genvai music trip --approve <id>        # use one, and cut to its beat
 genvai edit trip "drop the third clip"  # change it in plain English
+
+genvai create "why compound interest matters" -d 20   # no footage needed
 ```
 
 | Command | What it does | Ready |
@@ -44,6 +46,7 @@ genvai edit trip "drop the third clip"  # change it in plain English
 | `edit` | Change it in plain English, with a diff first | yes |
 | `restore` | Put back an earlier version | yes |
 | `music` | Suggest a track, approve one, align cuts to its beat | yes |
+| `create` | No footage? Make one from a description alone | yes |
 
 A project is a plain folder under `projects/`. Open it and you can see every asset, every
 version of the edit, and every render. Copy it to another machine and it still works.
