@@ -541,9 +541,11 @@ def _probe_ollama(base_url: str, model: str) -> tuple[str, str]:
 
     if not names:
         return "no models", f"{base_url} - pull one: ollama pull {model}"
-    if model in names:
+    # Ollama reports an untagged model as "name:latest", so a bare name in the config
+    # matches it. Comparing the strings directly reports a working model as missing.
+    if model in names or f"{model}:latest" in names:
         return "ok", f"{model} available ({len(names)} model(s))"
-    return "model missing", f"has {', '.join(names[:3])} - pull with: ollama pull {model}"
+    return "model missing", f"has {', '.join(sorted(names)[:3])} - pull: ollama pull {model}"
 
 
 def _cuda_detail() -> str:

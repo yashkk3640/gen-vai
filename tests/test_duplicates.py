@@ -169,3 +169,20 @@ def test_direction_of_a_gradient_matters() -> None:
     """Light-to-dark is not the same picture as dark-to-light."""
     ascending = np.repeat(np.linspace(20, 230, 16), 8).reshape(-1, 1) * np.ones((1, 128))
     assert hamming(perceptual_hash(ascending), perceptual_hash(ascending[::-1].copy())) > 64
+
+
+def test_a_featureless_image_is_never_grouped() -> None:
+    """Two near-black frames match trivially without being the same picture."""
+    from genvai.analysis import MIN_STRUCTURE
+
+    flat_a, flat_b = 0b0, 0b111
+    assert flat_a.bit_count() < MIN_STRUCTURE
+    assert group_duplicates({"a": flat_a, "b": flat_b}) == {}
+
+
+def test_structure_is_required_before_merging() -> None:
+    """A rich image still groups with its own re-encode."""
+    base = _scene(60)
+    hashes = {f"t{i}": perceptual_hash(_jpeg_like(base)) for i in range(2)}
+    assert all(h.bit_count() >= 24 for h in hashes.values())
+    assert len(set(group_duplicates(hashes).values())) == 1

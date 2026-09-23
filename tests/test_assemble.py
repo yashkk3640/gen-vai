@@ -344,3 +344,38 @@ def test_the_invariant_survives_alignment() -> None:
     )
     for scene in fit_to_beats(before).scenes:
         assert scene.duration == pytest.approx(scene.visual.output_duration, abs=1e-6)
+
+
+def test_a_short_reel_beats_one_padded_with_blur() -> None:
+    """Running short is a smaller failure than an out-of-focus shot in the cut."""
+    from genvai.pipeline.select import fit_to_duration
+
+    good = _photo("sharp", sharpness=0.9)
+    blurry = MediaItem(
+        asset_id="blurry",
+        kind="image",
+        source_name="blurry.jpg",
+        width=1920,
+        height=1080,
+        quality=ClipQuality(sharpness=0.02, exposure=0.5, motion=0.0, shake=0.0),
+    )
+    kept = fit_to_duration((good, blurry), 30.0)
+    assert [i.asset_id for i in kept] == ["sharp"]
+
+
+def test_when_everything_is_poor_it_still_makes_a_reel() -> None:
+    """Better a mediocre reel than none - but only when there is no alternative."""
+    from genvai.pipeline.select import fit_to_duration
+
+    poor = tuple(
+        MediaItem(
+            asset_id=f"p{i}",
+            kind="image",
+            source_name=f"p{i}.jpg",
+            width=100,
+            height=100,
+            quality=ClipQuality(sharpness=0.02, exposure=0.5, motion=0.0, shake=0.0),
+        )
+        for i in range(3)
+    )
+    assert fit_to_duration(poor, 6.0) != ()

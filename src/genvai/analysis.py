@@ -278,11 +278,26 @@ decided by floating-point noise, so two encodes of the same photo produce unrela
 there. Real photographs are full of such regions.
 """
 
-DUPLICATE_THRESHOLD = 40
+DUPLICATE_THRESHOLD = 12
 """Hamming distance below which two images are the same shot, out of 256 bits.
 
-Tuned loose on purpose. Missing a duplicate only costs a near-repeat in the cut, while
-falsely merging two moments silently loses one - so it errs toward merging less.
+Measured, and tighter than it first looks it should be. Two exports of one photo at
+different JPEG qualities come out at distance 0, and noise pushes that to about 6. The
+closest *false* pair observed on a realistic roll - a sharp portrait against a blurred
+landscape, alike only at thumbnail resolution - measured 20. Twelve sits between the two
+with room on both sides.
+
+An earlier value of 40 was set against easier fixtures and merged that pair. Erring
+generous is the wrong direction here: missing a duplicate costs a near-repeat in the
+cut, while a false merge silently loses a photo the user took.
+"""
+
+MIN_STRUCTURE = 24
+"""How many of the 256 bits must be set before an image may be grouped at all.
+
+A near-black or near-flat frame is almost all ties, and two such frames match each other
+trivially without being the same picture. Below this there is not enough evidence to
+judge, so the image is left ungrouped rather than merged on the strength of nothing.
 """
 
 
@@ -347,12 +362,18 @@ def group_duplicates(
     Each item is compared against group *representatives* rather than against every
     member. That prevents chaining, where A matches B and B matches C but A and C are
     plainly different shots, which would quietly merge a whole afternoon into one group.
+
+    An image with too little structure to fingerprint - a near-black frame, a blank wall -
+    is skipped entirely. Two of those match each other trivially, and grouping on that
+    basis loses a photo for no reason.
     """
     representatives: list[tuple[str, int]] = []
     assigned: dict[str, str] = {}
 
     for asset_id in sorted(hashes):
         fingerprint = hashes[asset_id]
+        if fingerprint.bit_count() < MIN_STRUCTURE:
+            continue  # too featureless to say it matches anything
         match = next(
             (rep for rep, value in representatives if hamming(value, fingerprint) <= threshold),
             None,

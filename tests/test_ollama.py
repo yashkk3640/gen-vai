@@ -179,3 +179,18 @@ def test_availability_is_false_when_the_server_is_down(
 
     monkeypatch.setattr(httpx, "get", refuse)
     assert llm.is_available() is False
+
+
+def test_an_untagged_model_name_matches_latest(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ollama reports an untagged model as "name:latest". A bare name must still match."""
+
+    class _Tags:
+        status_code = 200
+
+        def raise_for_status(self) -> None: ...
+
+        def json(self) -> dict:
+            return {"models": [{"name": "llama3.2:latest"}]}
+
+    monkeypatch.setattr(httpx, "get", lambda url, timeout: _Tags())
+    assert OllamaLLM(LLMSettings(model="llama3.2")).is_available() is True

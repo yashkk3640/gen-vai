@@ -180,15 +180,23 @@ def fit_to_duration(
 ) -> tuple[MediaItem, ...]:
     """Trim a shortlist down to what actually fits, keeping capture order.
 
-    Drops the weakest shots rather than speeding everything up. A reel that runs short
-    is fine; one where every shot is clipped to make the numbers work is not.
+    Drops the weakest shots rather than speeding everything up. A reel that runs short is
+    fine; one where every shot is clipped to make the numbers work is not.
+
+    Unusable shots - out of focus, crushed, badly shaken - are held back and only used if
+    there is nothing else at all. Running short is a smaller failure than padding to
+    length with a blurred frame, which is the one thing a viewer notices immediately.
     """
     if target <= 0.0:
         return ()
+
     ranked = sorted(items, key=lambda i: (-item_score(i, intent=intent), i.source_name))
+    usable = [i for i in ranked if i.quality and i.quality.usable]
+    rest = [i for i in ranked if i not in usable]
+
     kept: list[MediaItem] = []
     filled = 0.0
-    for item in ranked:
+    for item in usable or rest:
         if filled >= target and kept:
             break
         kept.append(item)
