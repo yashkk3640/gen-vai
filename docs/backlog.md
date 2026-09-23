@@ -35,10 +35,18 @@ Nothing knows whether a video performed. Everything above is a prior, never a
 measurement. A minimal version — paste back view figures, let the planner weight its
 choices — would turn assumptions into something that learns.
 
-### Auto-reframe and face tracking
+### Face-aware reframing � *partly done*
 
-Cropping landscape to 9:16 decapitates people. Needs face/saliency detection and a
-smoothed crop path. Scheduled as M6.
+Reframing works: detail-density saliency finds the subject and crops around it, moving
+the crop when the subject travels. What it does not do is know a face from a shirt.
+
+Faces would be a real improvement *on top* of this, weighted into the saliency map
+rather than replacing it - a face detector has nothing to say about a plate of food, a
+dog or a sunset, which is most of what a camera roll holds. It would also finally make
+`ClipQuality.face_area` non-zero.
+
+Costs a dependency: OpenCV's Haar cascades are the cheap option, a small ONNX detector
+the better one.
 
 ### Idea mode — *deprioritised on purpose*
 

@@ -163,6 +163,45 @@ class FrameAnalyzer:
         return float(match.group(1)) if match else None
 
 
+def sample_span(
+    media: Path, ffmpeg: Path, *, start: float, end: float, count: int = 8
+) -> list[np.ndarray]:
+    """Decode a handful of frames spread across one stretch of a clip.
+
+    Used by reframing, which needs to watch the subject move through the span that was
+    actually chosen rather than through the whole file.
+    """
+    duration = max(0.0, end - start)
+    if duration <= 0 or count < 1:
+        return []
+
+    rate = max(1.0, count / duration)
+    with tempfile.TemporaryDirectory(prefix="genvai-span-") as scratch:
+        directory = Path(scratch)
+        command = [
+            str(ffmpeg),
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-ss",
+            f"{start:.4f}",
+            "-t",
+            f"{duration:.4f}",
+            "-i",
+            str(media),
+            "-vf",
+            f"fps={rate},scale={WORK_WIDTH}:-2",
+            "-frames:v",
+            str(count),
+            "-f",
+            "image2",
+            str(directory / "%03d.png"),
+        ]
+        if subprocess.run(command, capture_output=True, check=False).returncode != 0:
+            return []
+        return [_as_array(p) for p in sorted(directory.glob("*.png"))]
+
+
 def _load_image(path: Path) -> list[np.ndarray]:
     try:
         with Image.open(path) as image:

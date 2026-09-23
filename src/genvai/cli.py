@@ -145,6 +145,7 @@ def reel(
             canvas=_canvas_for(aspect),
             seed=seed or _random_seed(),
             llm=llm,
+            ffmpeg=resolve_ffmpeg(),
             on_note=lambda note: console.print(f"[yellow]{note}[/yellow]"),
         )
     except GenvaiError as exc:
@@ -157,7 +158,14 @@ def reel(
         f"(beat {timeline.mean_scene_duration:.1f}s)"
     )
     renderer = FFmpegRenderer(settings.render, lambda asset_id: store.asset_path(project, asset_id))
-    outputs = render_timeline(timeline, project, renderer, store)
+    try:
+        outputs = render_timeline(timeline, project, renderer, store)
+    except GenvaiError as exc:
+        console.print(f"[red]{exc}[/red]")
+        if isinstance(exc, RenderError) and exc.stderr:
+            console.print(f"[dim]{exc.stderr}[/dim]")
+        raise typer.Exit(code=1) from exc
+
     for variant, path in outputs.items():
         console.print(f"  [green]{variant}[/green]  {path}")
 

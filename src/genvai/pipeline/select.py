@@ -14,12 +14,14 @@ question it is actually good at.
 
 import re
 from collections.abc import Callable
+from pathlib import Path
 
 from pydantic import Field
 
 from genvai.beats import snap
 from genvai.errors import GenvaiError
 from genvai.media import MediaItem, MediaLibrary
+from genvai.pipeline.reframe import reframe, source_aspects
 from genvai.ports import LLMPort, ProjectStore
 from genvai.timeline import (
     Asset,
@@ -339,6 +341,7 @@ def make_reel(
     canvas: Canvas | None = None,
     seed: int = 0,
     llm: LLMPort | None = None,
+    ffmpeg: Path | None = None,
     on_note: Callable[[str], None] | None = None,
 ) -> Timeline:
     """Library -> a saved, renderable timeline.
@@ -388,6 +391,14 @@ def make_reel(
         captions=captions,
         hook_asset_id=hook,
     )
+
+    if ffmpeg is not None:
+        timeline = reframe(
+            timeline,
+            lambda asset_id: store.asset_path(project_id, asset_id),
+            ffmpeg,
+            aspects=source_aspects(timeline, library),
+        )
 
     versions = store.versions(project_id)
     timeline = timeline.model_copy(update={"version": (max(versions) + 1) if versions else 1})

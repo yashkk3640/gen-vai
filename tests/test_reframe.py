@@ -209,3 +209,136 @@ def test_reframing_is_skipped_when_shapes_match() -> None:
 
 def test_reframing_is_needed_for_landscape_into_vertical() -> None:
     assert needs_reframing(WIDE, TALL) is True
+
+
+# ----------------------------------------------------------------- the crop filter
+
+
+def test_a_still_crop_is_a_plain_filter() -> None:
+    from genvai.adapters.ffmpeg import _crop
+
+    assert _crop((0.2, 0.0, 0.6, 1.0)) == "crop=iw*0.6:ih*1.0:iw*0.2:ih*0.0"
+
+
+def test_no_crop_is_a_passthrough() -> None:
+    from genvai.adapters.ffmpeg import _crop
+
+    assert _crop(None) == "null"
+
+
+def test_a_moving_crop_varies_with_time() -> None:
+    from genvai.adapters.ffmpeg import _crop
+
+    built = _crop((0.1, 0.0, 0.6, 1.0), (0.3, 0.0, 0.6, 1.0), 2.0)
+    assert "t/2.0000" in built
+    assert "eval=frame" not in built, "crop has no eval option and needs none"
+
+
+def test_a_crop_that_would_resize_falls_back_to_still() -> None:
+    """ffmpeg fixes the output size once; only the position may move."""
+    from genvai.adapters.ffmpeg import _crop
+
+    built = _crop((0.1, 0.0, 0.6, 1.0), (0.3, 0.0, 0.4, 1.0), 2.0)
+    assert "t/" not in built
+
+
+def test_a_moving_crop_with_no_duration_falls_back() -> None:
+    from genvai.adapters.ffmpeg import _crop
+
+    assert "t/" not in _crop((0.1, 0.0, 0.6, 1.0), (0.3, 0.0, 0.6, 1.0), 0.0)
+
+
+# ------------------------------------------------------------------- the pipeline
+
+
+def _clip_timeline(canvas_w: int, canvas_h: int, crop=None):
+    from genvai.timeline import (
+        Asset,
+        AssetProvenance,
+        Canvas,
+        ClipVisual,
+        Scene,
+        Timeline,
+    )
+
+    return Timeline(
+        intent="t",
+        canvas=Canvas(width=canvas_w, height=canvas_h),
+        scenes=(
+            Scene(
+                id="s1",
+                duration=2.0,
+                visual=ClipVisual(asset_id="a", source_start=0.2, source_end=2.2, crop=crop),
+            ),
+        ),
+        assets={
+            "a": Asset(
+                kind="video",
+                path="a.mp4",
+                sha256="a",
+                provenance=AssetProvenance(provider="test"),
+            )
+        },
+    )
+
+
+def test_a_matching_shape_is_left_alone(tmp_path, sample_media) -> None:
+    """A vertical clip in a vertical reel must cost nothing at all."""
+    from genvai.pipeline.reframe import reframe
+
+    before = _clip_timeline(1280, 720)
+    after = reframe(
+        before,
+        lambda _: sample_media["clip_a"],
+        tmp_path / "no-ffmpeg-needed",
+        aspects={"a": 1280 / 720},
+    )
+    assert after == before
+
+
+def test_a_landscape_clip_in_a_vertical_reel_is_cropped(sample_media, ffmpeg_binary) -> None:
+    from genvai.pipeline.reframe import reframe
+
+    after = reframe(
+        _clip_timeline(1080, 1920),
+        lambda _: sample_media["clip_a"],
+        ffmpeg_binary,
+        aspects={"a": 1280 / 720},
+    )
+    crop = after.scenes[0].visual.crop
+    assert crop is not None
+    assert crop[2] == pytest.approx((1080 / 1920) / (1280 / 720), rel=0.01)
+
+
+def test_an_existing_crop_is_not_overwritten(sample_media, ffmpeg_binary) -> None:
+    """A crop the user chose is a decision, not a default."""
+    from genvai.pipeline.reframe import reframe
+
+    chosen = (0.0, 0.0, 0.5, 1.0)
+    after = reframe(
+        _clip_timeline(1080, 1920, crop=chosen),
+        lambda _: sample_media["clip_a"],
+        ffmpeg_binary,
+        aspects={"a": 1280 / 720},
+    )
+    assert after.scenes[0].visual.crop == chosen
+
+
+def test_an_unknown_aspect_is_left_alone(sample_media, ffmpeg_binary) -> None:
+    from genvai.pipeline.reframe import reframe
+
+    before = _clip_timeline(1080, 1920)
+    assert reframe(before, lambda _: sample_media["clip_a"], ffmpeg_binary, aspects={}) == before
+
+
+def test_an_unreadable_asset_does_not_break_the_reel(ffmpeg_binary) -> None:
+    """Reframing improves a cut; it must never be why one fails to render."""
+    from pathlib import Path
+
+    from genvai.pipeline.reframe import reframe
+
+    before = _clip_timeline(1080, 1920)
+    after = reframe(
+        before, lambda _: Path("does-not-exist.mp4"), ffmpeg_binary, aspects={"a": 1280 / 720}
+    )
+    assert after == before

@@ -185,7 +185,10 @@ class FFmpegRenderer:
                 "-i",
                 str(self._resolve_asset(visual.asset_id)),
             ]
-            chain = f"[0:v]{_crop(visual.crop)}{_fit(visual.fit, canvas)}"
+            chain = (
+                f"[0:v]{_crop(visual.crop, visual.crop_end, scene.duration)}"
+                f"{_fit(visual.fit, canvas)}"
+            )
             if visual.speed != 1.0:
                 chain += f",setpts=PTS/{visual.speed}"
             chain += f",fps={canvas.fps},setsar=1"
@@ -553,12 +556,27 @@ def _atempo(speed: float) -> str:
     return ",".join(f"atempo={stage:.6f}" for stage in stages)
 
 
-def _crop(rect: Rect | None) -> str:
-    """Keep a sub-rectangle of the source, in fractions of its own frame."""
+def _crop(rect: Rect | None, end: Rect | None = None, duration: float = 0.0) -> str:
+    """Keep a sub-rectangle of the source, in fractions of its own frame.
+
+    With `end`, the window travels there over the shot - a slow reframe that follows the
+    subject. Only the position may move: `crop` refuses a changing output size, so a
+    mismatched width or height falls back to holding the start rectangle rather than
+    producing a graph ffmpeg will reject.
+    """
     if rect is None:
         return "null"
     x, y, width, height = rect
-    return f"crop=iw*{width}:ih*{height}:iw*{x}:ih*{y}"
+    if end is None or duration <= 0 or (end[2], end[3]) != (width, height):
+        return f"crop=iw*{width}:ih*{height}:iw*{x}:ih*{y}"
+
+    # No `eval=frame` here: crop has no such option, and needs none. Its x and y
+    # expressions are re-evaluated every frame already; only w and h are fixed once,
+    # which is exactly the split this needs.
+    progress = f"min(1,t/{duration:.4f})"
+    moving_x = f"iw*({x}+({end[0]}-{x})*{progress})"
+    moving_y = f"ih*({y}+({end[1]}-{y})*{progress})"
+    return f"crop=w=iw*{width}:h=ih*{height}:x='{moving_x}':y='{moving_y}'"
 
 
 def _ease(progress: str, easing: str) -> str:

@@ -115,6 +115,14 @@ class ClipVisual(Frozen):
     source_start: Seconds = 0.0
     source_end: Seconds
     crop: Rect | None = None
+    crop_end: Rect | None = Field(
+        default=None,
+        description=(
+            "Where the crop finishes, when the subject moves during the shot. None holds "
+            "it still, which is the usual case. Must share the width and height of "
+            "`crop` - the output size cannot change mid-shot."
+        ),
+    )
     fit: Fit = "cover"
     speed: float = Field(default=1.0, gt=0.1, le=10.0)
     mute: bool = Field(
