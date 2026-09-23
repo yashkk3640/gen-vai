@@ -189,3 +189,102 @@ def test_an_unreadable_track_does_not_break_the_render(tmp_path: Path, ffmpeg_bi
     result = FFmpegBeatDetector(ffmpeg_binary).detect(broken)
     assert result.beats == ()
     assert result.bpm > 0
+
+
+# ------------------------------------------------------------------- the two steps
+
+
+@pytest.fixture
+def project(tmp_path: Path, library: Path):
+    """A project with a one-shot timeline, ready for a music bed."""
+    from genvai.adapters.fs_store import FilesystemStore
+    from genvai.timeline import AssetVisual, Scene, Timeline
+
+    store = FilesystemStore(tmp_path / "projects")
+    store.create("t", "t")
+    store.save_timeline(
+        "t",
+        Timeline(
+            intent="t",
+            scenes=(Scene(id="s1", duration=2.2, visual=AssetVisual(asset_id="a")),),
+        ),
+    )
+    return store
+
+
+def test_suggesting_does_not_resolve_anything(project, library: Path) -> None:
+    """candidates_ready is not renderable, precisely because nobody has chosen yet."""
+    from genvai.pipeline.music import suggest
+
+    timeline = suggest(
+        "t", project, LocalMusicProvider(MusicSettings(library_dir=library)), mood="calm"
+    )
+    assert timeline.music.state == "candidates_ready"
+    assert timeline.music.asset_id is None
+    assert not timeline.music.is_renderable
+
+
+def test_suggesting_records_what_was_offered(project, library: Path) -> None:
+    from genvai.pipeline.music import suggest
+
+    timeline = suggest(
+        "t", project, LocalMusicProvider(MusicSettings(library_dir=library)), mood="calm"
+    )
+    assert len(timeline.music.candidates) == 3
+    assert timeline.music.query is not None
+
+
+def test_an_empty_library_says_what_to_do(project, tmp_path: Path) -> None:
+    from genvai.errors import GenvaiError
+    from genvai.pipeline.music import suggest
+
+    absent = LocalMusicProvider(MusicSettings(library_dir=tmp_path / "nope"))
+    with pytest.raises(GenvaiError, match="LIBRARY_DIR"):
+        suggest("t", project, absent, mood="calm")
+
+
+def test_approving_resolves_and_records_provenance(project, library: Path) -> None:
+    """A track whose licence is lost cannot safely be published with."""
+    from genvai.adapters.beat import FFmpegBeatDetector
+    from genvai.pipeline.music import approve, suggest
+
+    provider = LocalMusicProvider(MusicSettings(library_dir=library))
+    suggest("t", project, provider, mood="calm")
+    detector = FFmpegBeatDetector(Path("does-not-exist"))
+
+    timeline = approve("t", project, provider, detector, "quiet-hours", confirmed=True)
+    assert timeline.music.state == "resolved"
+    assert timeline.music.is_renderable
+    asset = timeline.assets[timeline.music.asset_id]
+    assert asset.provenance.licence == "CC-BY-4.0"
+    assert asset.kind == "audio"
+
+
+def test_approving_an_unoffered_track_is_refused(project, library: Path) -> None:
+    from genvai.adapters.beat import FFmpegBeatDetector
+    from genvai.errors import GenvaiError
+    from genvai.pipeline.music import approve, suggest
+
+    provider = LocalMusicProvider(MusicSettings(library_dir=library))
+    suggest("t", project, provider, mood="calm")
+    with pytest.raises(GenvaiError, match="No candidate"):
+        approve("t", project, provider, FFmpegBeatDetector(Path("x")), "made-up", confirmed=True)
+
+
+def test_declining_is_renderable(project) -> None:
+    """No music is an answer, not an absence of one."""
+    from genvai.pipeline.music import decline
+
+    timeline = decline("t", project)
+    assert timeline.music.state == "declined"
+    assert timeline.music.is_renderable
+
+
+def test_each_music_step_is_its_own_version(project, library: Path) -> None:
+    from genvai.pipeline.music import decline, suggest
+
+    provider = LocalMusicProvider(MusicSettings(library_dir=library))
+    first = suggest("t", project, provider, mood="calm")
+    second = decline("t", project)
+    assert second.version > first.version
+    assert project.load_timeline("t", first.version).music.state == "candidates_ready"

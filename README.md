@@ -28,8 +28,9 @@ breaking. For the LLM features, install [Ollama](https://ollama.com) and
 ```bash
 genvai add trip ~/Pictures/trip/        # import and analyse a camera roll
 genvai reel trip --duration 30          # pick, trim, sequence, caption
-genvai edit trip "drop the third clip"  # change it
-genvai render trip                      # re-render (only what changed)
+genvai music trip --mood "calm piano"   # suggest tracks (downloads nothing)
+genvai music trip --approve <id>        # use one, and cut to its beat
+genvai edit trip "drop the third clip"  # change it in plain English
 ```
 
 | Command | What it does | Ready |
@@ -42,7 +43,7 @@ genvai render trip                      # re-render (only what changed)
 | `reel` | Build a reel — picks, trims, orders, captions | yes |
 | `edit` | Change it in plain English, with a diff first | yes |
 | `restore` | Put back an earlier version | yes |
-| `music` | Suggest and approve a track | M5 |
+| `music` | Suggest a track, approve one, align cuts to its beat | yes |
 
 A project is a plain folder under `projects/`. Open it and you can see every asset, every
 version of the edit, and every render. Copy it to another machine and it still works.

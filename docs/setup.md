@@ -44,6 +44,26 @@ rather than guessed:
 Bigger is better where there is VRAM for it. Point at something else by copying
 `.env.example` to `.env` and setting `GENVAI_LLM__MODEL`.
 
+## Music
+
+Nothing ships with the project. Point it at your own tracks:
+
+```
+GENVAI_MUSIC__LIBRARY_DIR=/path/to/tracks
+```
+
+Any audio file is a track. An optional sidecar JSON beside it carries what the file
+cannot say:
+
+```
+quiet-hours.mp3
+quiet-hours.json   {"mood": "calm", "genre": "piano", "bpm": 72, "licence": "CC-BY-4.0"}
+```
+
+`genvai music <project> --mood "..."` searches and downloads nothing. Only
+`--approve <id>` fetches, and remote downloads additionally need
+`GENVAI_MUSIC__ALLOW_DOWNLOAD=true`.
+
 ## Another machine
 
 Committed and travels: `pyproject.toml`, `uv.lock`, `.python-version`, `src/`, `docs/`.

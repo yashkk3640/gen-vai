@@ -210,3 +210,137 @@ def test_make_reel_is_deterministic_for_a_seed(stocked: FilesystemStore) -> None
     first = make_reel("trip", stocked, target_duration=8.0, seed=7)
     second = make_reel("trip", stocked, target_duration=8.0, seed=7)
     assert [s.model_dump() for s in first.scenes] == [s.model_dump() for s in second.scenes]
+
+
+# ------------------------------------------------------------------ beat alignment
+
+
+def _with_beats(timeline, bpm: float = 120.0, count: int = 40):
+    from genvai.timeline import BeatMap, Music
+
+    period = 60.0 / bpm
+    beats = tuple(i * period for i in range(count))
+    return timeline.model_copy(
+        update={
+            "music": Music(
+                state="resolved",
+                asset_id="m",
+                beat_map=BeatMap(bpm=bpm, beats=beats, downbeats=beats[::4]),
+            )
+        }
+    )
+
+
+def _photos(*durations: float):
+    from genvai.timeline import AssetVisual, Scene, Timeline
+
+    return Timeline(
+        intent="t",
+        scenes=tuple(
+            Scene(id=f"s{i}", duration=d, visual=AssetVisual(asset_id=f"a{i}"))
+            for i, d in enumerate(durations)
+        ),
+    )
+
+
+def test_without_music_nothing_moves() -> None:
+    from genvai.pipeline.select import fit_to_beats
+
+    before = _photos(2.1, 2.3)
+    assert fit_to_beats(before) == before
+
+
+def test_snapping_can_be_switched_off() -> None:
+    from genvai.pipeline.select import fit_to_beats
+    from genvai.timeline import Export
+
+    before = _with_beats(_photos(2.1, 2.3)).model_copy(
+        update={"export": Export(snap_cuts_to_beat=False)}
+    )
+    assert fit_to_beats(before) == before
+
+
+def test_photo_boundaries_land_on_beats() -> None:
+    from genvai.pipeline.select import fit_to_beats
+
+    after = fit_to_beats(_with_beats(_photos(2.1, 2.4, 1.9)))
+    at = 0.0
+    for scene in after.scenes:
+        at += scene.duration
+        assert min(abs(at - b) for b in (i * 0.5 for i in range(40))) < 1e-6
+
+
+def test_a_cut_too_far_from_any_beat_stays_put() -> None:
+    """A quarter beat is the limit; beyond it the shot matters more than the grid."""
+    from genvai.pipeline.select import fit_to_beats
+
+    before = _with_beats(_photos(2.25))
+    assert fit_to_beats(before).scenes[0].duration == pytest.approx(2.25)
+
+
+def test_a_clip_keeps_its_frames_and_changes_speed_instead() -> None:
+    """The span was chosen because it holds the good moment; it must not be recut."""
+    from genvai.pipeline.select import fit_to_beats
+    from genvai.timeline import Scene, Timeline
+
+    before = _with_beats(
+        Timeline(
+            intent="t",
+            scenes=(
+                Scene(
+                    id="s0",
+                    duration=2.05,
+                    visual=ClipVisual(asset_id="v", source_start=3.0, source_end=5.05),
+                ),
+            ),
+        )
+    )
+    after = fit_to_beats(before).scenes[0]
+    assert after.duration == pytest.approx(2.0)
+    assert after.visual.source_start == 3.0, "the same frames"
+    assert after.visual.source_end == pytest.approx(5.05)
+    assert after.visual.speed == pytest.approx(2.05 / 2.0)
+
+
+def test_a_clip_needing_too_much_speed_change_is_left_alone() -> None:
+    from genvai.pipeline.select import fit_to_beats
+    from genvai.timeline import Scene, Timeline
+
+    before = _with_beats(
+        Timeline(
+            intent="t",
+            scenes=(
+                Scene(
+                    id="s0",
+                    duration=0.85,
+                    visual=ClipVisual(asset_id="v", source_end=0.85),
+                ),
+            ),
+        ),
+        bpm=60.0,
+    )
+    after = fit_to_beats(before).scenes[0]
+    assert after.duration == pytest.approx(0.85)
+    assert after.visual.speed == 1.0
+
+
+def test_the_invariant_survives_alignment() -> None:
+    """Every clip scene must still satisfy duration == span / speed."""
+    from genvai.pipeline.select import fit_to_beats
+    from genvai.timeline import Scene, Timeline
+
+    before = _with_beats(
+        Timeline(
+            intent="t",
+            scenes=tuple(
+                Scene(
+                    id=f"s{i}",
+                    duration=1.9 + i * 0.15,
+                    visual=ClipVisual(asset_id=f"v{i}", source_end=1.9 + i * 0.15),
+                )
+                for i in range(5)
+            ),
+        )
+    )
+    for scene in fit_to_beats(before).scenes:
+        assert scene.duration == pytest.approx(scene.visual.output_duration, abs=1e-6)

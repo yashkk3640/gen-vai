@@ -17,6 +17,7 @@ from collections.abc import Callable
 
 from pydantic import Field
 
+from genvai.beats import snap
 from genvai.errors import GenvaiError
 from genvai.media import MediaItem, MediaLibrary
 from genvai.ports import LLMPort, ProjectStore
@@ -271,17 +272,62 @@ def _role(item: MediaItem, index: int, total: int, hook_asset_id: str | None) ->
     return "hook" if index == 0 else "payoff" if index == total - 1 else "body"
 
 
+SNAP_TOLERANCE = 0.25
+"""How far a cut may move, as a fraction of one beat.
+
+A quarter beat is enough to land on the grid and small enough that the shot still shows
+what it was trimmed to show.
+"""
+
+MAX_SPEED_NUDGE = 0.12
+"""How much a clip may be sped up or slowed so its boundary lands on a beat.
+
+Twelve percent is imperceptible on a two-second shot. Beyond that the alignment is not
+worth what it does to the footage.
+"""
+
+
 def fit_to_beats(timeline: Timeline) -> Timeline:
     """Nudge scene boundaries onto the music's beat grid.
 
-    A no-op until a track has been chosen and analysed, which happens in the music
-    milestone. Returning the timeline unchanged rather than raising means the render
-    path works the same way with or without music.
+    A no-op until a track has been chosen and analysed, so the render path behaves the
+    same with or without music.
+
+    Clips are the awkward part. A scene's duration must equal its span divided by its
+    speed, so lengthening the scene means changing one of them. Changing the *span*
+    would show more or less than was chosen, and could read past the end of the source
+    file - which the timeline has no way to check. Changing the speed keeps exactly the
+    chosen frames and stays inside the invariant, so that is what happens, bounded to a
+    nudge nobody will see. A boundary needing more than that is left where it is: a cut
+    that lands on the beat but misses the moment is a bad trade.
     """
     beats = timeline.music.beat_map
     if beats is None or not timeline.export.snap_cuts_to_beat or not beats.beats:
         return timeline
-    return timeline
+
+    tolerance = (60.0 / beats.bpm) * SNAP_TOLERANCE
+    scenes: list[Scene] = []
+    at = 0.0
+    for scene in timeline.scenes:
+        wanted = snap(at + scene.duration, beats.beats, tolerance=tolerance)
+        scenes.append(_stretched(scene, wanted - at))
+        at += scenes[-1].duration
+    return timeline.model_copy(update={"scenes": tuple(scenes)})
+
+
+def _stretched(scene: Scene, duration: float) -> Scene:
+    """Give a scene a new length, honouring what its visual allows."""
+    duration = max(MIN_BEAT, min(MAX_BEAT * 2, duration))
+    visual = scene.visual
+    if not isinstance(visual, ClipVisual):
+        return scene.model_copy(update={"duration": duration})
+
+    speed = visual.source_duration / duration
+    if abs(speed - visual.speed) > MAX_SPEED_NUDGE * visual.speed:
+        return scene
+    return scene.model_copy(
+        update={"duration": duration, "visual": visual.model_copy(update={"speed": speed})}
+    )
 
 
 def make_reel(

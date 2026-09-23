@@ -17,13 +17,18 @@ from rich.table import Table
 
 from genvai import __version__
 from genvai.adapters.analyzer import FrameAnalyzer
+from genvai.adapters.beat import FFmpegBeatDetector
 from genvai.adapters.ffmpeg import FFmpegRenderer, resolve_ffmpeg
 from genvai.adapters.fs_store import FilesystemStore
+from genvai.adapters.music_local import LocalMusicProvider
 from genvai.adapters.ollama import OllamaLLM
 from genvai.config import load_settings
 from genvai.errors import GenvaiError, RenderError
 from genvai.pipeline.edit import edit as run_edit
 from genvai.pipeline.ingest import ingest, summarise
+from genvai.pipeline.music import approve as approve_music
+from genvai.pipeline.music import decline as decline_music
+from genvai.pipeline.music import suggest as suggest_music
 from genvai.pipeline.render import plan_render
 from genvai.pipeline.render import render as render_timeline
 from genvai.pipeline.select import make_reel
@@ -353,13 +358,66 @@ def restore(
 @app.command()
 def music(
     project: str = typer.Argument(..., help="Project id."),
-    approve: str | None = typer.Option(None, "--approve", help="Candidate id to download."),
+    mood: str = typer.Option("", "--mood", help="What it should sound like."),
+    approve_id: str = typer.Option(None, "--approve", help="Candidate id to use."),
+    none: bool = typer.Option(False, "--none", help="Render without music."),
 ) -> None:
-    """Show suggested tracks, or approve one for download.
+    """Suggest tracks, or approve one.
 
-    Nothing is fetched until a candidate is approved here.
+    Nothing is fetched until you name a candidate here. With no options it shows what was
+    suggested last time.
     """
-    _not_yet("music", "M5")
+    settings = load_settings()
+    store = FilesystemStore(settings.projects_dir)
+    provider = LocalMusicProvider(settings.music)
+
+    try:
+        if none:
+            timeline = decline_music(project, store)
+            console.print(f"[bold]{project}[/bold] v{timeline.version}  no music")
+            return
+
+        if approve_id:
+            timeline = approve_music(
+                project,
+                store,
+                provider,
+                FFmpegBeatDetector(resolve_ffmpeg()),
+                approve_id,
+                confirmed=True,
+            )
+            beats = timeline.music.beat_map
+            tempo = f"{beats.bpm:.0f} BPM, cuts aligned" if beats else "no beat detected"
+            console.print(f"[bold]{project}[/bold] v{timeline.version}  music set - {tempo}")
+            console.print(f"[dim]Render it with: genvai render {project}[/dim]")
+            return
+
+        timeline = (
+            suggest_music(project, store, provider, mood=mood)
+            if mood
+            else (store.load_timeline(project))
+        )
+    except GenvaiError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from exc
+
+    if not timeline.music.candidates:
+        console.print(
+            f'[dim]No suggestions yet. Try: genvai music {project} --mood "calm piano"[/dim]'
+        )
+        return
+
+    table = Table(show_header=True, header_style="bold")
+    table.add_column("Id")
+    table.add_column("Track", overflow="fold")
+    table.add_column("Licence")
+    for candidate in timeline.music.candidates:
+        table.add_row(candidate.id, candidate.title, candidate.licence)
+    console.print(table)
+    console.print(
+        f"[dim]Nothing has been downloaded. Choose one with: "
+        f"genvai music {project} --approve <id>[/dim]"
+    )
 
 
 # --------------------------------------------------------------------------- helpers
