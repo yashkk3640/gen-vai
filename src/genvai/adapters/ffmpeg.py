@@ -667,14 +667,26 @@ def _wrap_width(style: TextStyle, canvas: Canvas, size: int) -> int:
 
 
 def _wrap(text: str, width: int) -> str:
-    """Greedy wrap. drawtext has no wrapping of its own, so lines are pre-broken."""
+    """Greedy wrap. drawtext has no wrapping of its own, so lines are pre-broken.
+
+    A word longer than the line is broken rather than left to overflow. Without this a
+    single long token - a phone number, a URL, a hashtag - runs off the side of the frame
+    with nothing at all to signal it, which is worse than an ugly break.
+    """
     lines: list[str] = []
     current = ""
     for word in text.split():
-        candidate = f"{current} {word}".strip()
+        remaining = word
+        while len(remaining) > width:
+            if current:
+                lines.append(current)
+                current = ""
+            lines.append(remaining[:width])
+            remaining = remaining[width:]
+        candidate = f"{current} {remaining}".strip()
         if len(candidate) > width and current:
             lines.append(current)
-            current = word
+            current = remaining
         else:
             current = candidate
     if current:

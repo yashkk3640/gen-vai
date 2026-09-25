@@ -231,3 +231,25 @@ def test_sped_up_clip_retimes_audio_with_video(project: tuple) -> None:
     info = _renderer(store, pid).probe(outputs["full"])
     assert info.has_audio
     assert info.duration == pytest.approx(1.0, abs=0.25)
+
+
+def test_a_long_unbroken_word_is_broken_not_overflowed() -> None:
+    """A phone number or URL has no spaces; left alone it runs off the side of the frame."""
+    from genvai.adapters.ffmpeg import _wrap
+
+    wrapped = _wrap("7043641428", 6)
+    assert wrapped.split("\n") == ["704364", "1428"]
+
+
+def test_wrapping_still_prefers_spaces() -> None:
+    from genvai.adapters.ffmpeg import _wrap
+
+    assert _wrap("call or DM to book", 8).split("\n") == ["call or", "DM to", "book"]
+
+
+def test_a_long_word_among_short_ones_does_not_lose_the_others() -> None:
+    from genvai.adapters.ffmpeg import _wrap
+
+    assert "".join(_wrap("hi supercalifragilistic bye", 8).split("\n")).replace(" ", "") == (
+        "hisupercalifragilisticbye"
+    )
