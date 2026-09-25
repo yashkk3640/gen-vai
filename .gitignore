@@ -27,6 +27,11 @@ models/
 *.safetensors
 *.ckpt
 
+# Client work. Real jobs live here - artwork, phone numbers, finished cuts - and this
+# repository is public. Keeping it out by default means nothing of a client's ends up in
+# the history by accident, where it is awkward to remove.
+beauty parlor/
+
 # Editors / OS
 .vscode/
 .idea/
