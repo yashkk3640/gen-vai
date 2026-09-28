@@ -76,6 +76,9 @@ edit, undo, and idea mode. What is left is refinement; see [TODO.md](TODO.md).
 
 ## Docs
 
+Picking this up fresh? Start with **[CONTEXT.md](CONTEXT.md)** — what was measured, what
+was tried and rejected, and the gotchas that cost time.
+
 [docs/](docs/) — [vision](docs/vision.md) · [architecture](docs/architecture.md) ·
 [timeline format](docs/timeline.md) · [setup](docs/setup.md) ·
 [decisions](docs/decisions.md) · [backlog](docs/backlog.md)

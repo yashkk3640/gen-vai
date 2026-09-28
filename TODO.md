@@ -49,6 +49,22 @@ Things that work as designed but that you should know before trusting the output
 - [x] **M8** Promo mode — a reel from designed artwork, no script to write.
       `genvai promo`
 
+## Next up - from the client's feedback on the two reels
+
+- [ ] **Promo reels are all the same shape.** The beat structure in `pipeline/promo.py`
+      is hardcoded - hook, prices, menu card, CTA - so two reels for one client look
+      like the same reel twice. Needs several structures, picked by seed or flag
+- [ ] **The "full" cut has no sound.** Measured at -91 dB: digital silence. `promo`
+      never asks about music, so both variants are identical. Either wire in the
+      existing suggest/approve flow or stop emitting a variant that promises audio
+- [ ] **Backdrops with people in them read better.** The region finder scores on
+      picture-likeness and cannot tell a face from a flower. Faces in the saliency map
+      fixes this and `face_area` at the same time
+- [ ] **Check what is actually trending** before redesigning the structures - this
+      session could not; knowledge runs to May 2026 and trends move weekly
+- [ ] Nail-art add-ons are still unread: a grid whose price sits under a *wrapped*
+      label. Grids and wrapped labels each work; both at once does not
+
 ## Worth doing next
 
 - [ ] Tune the thresholds against a **real** camera roll. Highest value of anything here
