@@ -43,6 +43,16 @@ Things that work as designed but that you should know before trusting the output
 - [ ] `face_area` is always 0 — reframing uses detail saliency, not faces
 - [ ] The Stable Diffusion provider is written but has never been run
 
+## M8 - promo mode (in progress)
+
+Make a reel from designed artwork - a poster, a price list - without writing a script.
+
+- [x] Brand palette read off the artwork, so no colours need specifying
+- [x] `VisionPort`, and OCR behind it. A vision model was tried first and hallucinated
+      the prices; see [docs/setup.md](docs/setup.md) for the measurement
+- [ ] Automatic composition: picture regions, scrim, poster cards
+- [ ] `genvai promo`, with the confirmation table before anything is built
+
 ## Worth doing next
 
 - [ ] Tune the thresholds against a **real** camera roll. Highest value of anything here

@@ -21,6 +21,7 @@ Install only what the machine can use:
 uv sync --extra image   # torch + diffusers (~3 GB, needs a GPU)
 uv sync --extra tts     # Piper narration (CPU)
 uv sync --extra asr     # faster-whisper
+uv sync --extra ocr     # read a poster's prices (~10 MB, CPU only)
 uv sync --extra dev     # pytest, ruff, mypy
 ```
 
@@ -43,6 +44,23 @@ rather than guessed:
 
 Bigger is better where there is VRAM for it. Point at something else by copying
 `.env.example` to `.env` and setting `GENVAI_LLM__MODEL`.
+
+## Reading a poster
+
+`genvai promo` needs to know what a poster says. That is OCR, not a vision model, and the
+difference was measured on a real price list:
+
+| | time | result |
+| --- | --- | --- |
+| `moondream` (1.8B vision) | 138s | invented services, dollars on a rupee poster, one line repeated six times |
+| RapidOCR (`--extra ocr`) | 4.4s | every price correct, confidence 0.94-1.00 |
+
+A language model asked for a number always produces one. OCR either resolves the
+characters or reports that it could not, which for a price is the only acceptable
+behaviour. The extra is ~10 MB of ONNX models, CPU only - no torch, no system install.
+
+Pairing a service to its price is then geometry, and imperfect on unusual layouts, so
+what was read is always shown for confirmation before anything is built.
 
 ## Music
 
