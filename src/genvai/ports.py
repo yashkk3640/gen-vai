@@ -14,6 +14,7 @@ from typing import Literal, Protocol, TypeVar, runtime_checkable
 from pydantic import BaseModel
 
 from genvai.media import MediaItem, MediaLibrary
+from genvai.promo import Brief
 from genvai.timeline import (
     Asset,
     AssetProvenance,
@@ -183,6 +184,31 @@ class BeatDetector(Protocol):
     def is_available(self) -> bool: ...
 
     def detect(self, audio: Path) -> BeatMap: ...
+
+
+@runtime_checkable
+class VisionPort(Protocol):
+    """Reads what is printed on a piece of artwork.
+
+    Needed only for promo mode, where the content of the reel is on a poster rather than
+    in a camera roll. Optional: without it the user supplies the offers instead, which is
+    slower but never wrong.
+    """
+
+    @property
+    def name(self) -> str: ...
+
+    def is_available(self) -> bool: ...
+
+    def read(self, image: Path) -> Brief:
+        """Extract offers, business, occasion and phone from a poster.
+
+        Returns an empty brief rather than raising when the model answers with nothing
+        usable - losing the automation is a smaller failure than losing the command.
+        """
+        ...
+
+    def unload(self) -> None: ...
 
 
 @runtime_checkable
