@@ -162,3 +162,46 @@ def test_low_confidence_text_is_ignored() -> None:
 
 def test_an_empty_reading_yields_an_empty_brief() -> None:
     assert not read_brief([]).is_usable
+
+
+def test_the_next_service_is_not_used_as_a_note() -> None:
+    """A note saying the name of the service below it puts that name under the wrong
+    price, and the footer is on screen."""
+    boxes = [
+        _box("GEL POLISH HAND TOE", 180, 620, h=28),
+        _box("300", 520, 626, w=60),
+        _box("CAT EYE POLISH HAND", 180, 660, h=24),
+        _box("300", 520, 666, w=60),
+    ]
+    offers = pair_offers(join_wrapped(boxes))
+    assert all(o.note == "" for o in offers), [o.note for o in offers]
+
+
+def test_genuine_small_print_is_still_kept() -> None:
+    boxes = [
+        _box("EYEBROW", 230, 490, h=28),
+        _box("(Uparlips Free)", 250, 524, h=16),
+        _box("40", 594, 496, w=60),
+    ]
+    assert pair_offers(join_wrapped(boxes))[0].note == "(Uparlips Free)"
+
+
+def test_a_section_heading_is_not_small_print() -> None:
+    """Small print is sentence case; a heading is in capitals."""
+    boxes = [
+        _box("MANICURE", 230, 1020, h=28),
+        _box("600", 594, 1024, w=60),
+        _box("FACIAL", 230, 1060, h=24),
+    ]
+    assert pair_offers(join_wrapped(boxes))[0].note == ""
+
+
+def test_a_price_pill_spanning_a_wrapped_label_belongs_to_the_pair() -> None:
+    """The nail poster: a tall pill centred across two lines. Deciding by which line its
+    centre falls nearer turns on a few pixels and flips between identical rows."""
+    boxes = [
+        _box("GEL POLISH", 189, 481, h=33, w=212),
+        _box("150", 454, 492, h=60, w=97),
+        _box("HAND", 188, 522, h=38, w=113),
+    ]
+    assert _services(boxes) == [("GEL POLISH HAND", "₹150")]

@@ -28,6 +28,13 @@ row. Price lists set the price a little above or below its label."""
 NOTE_GAP = 1.9
 """How far below a service its small print may sit, in multiples of the label's height."""
 
+SPANNING = 1.4
+"""How much taller than a label a price box must be to count as the group's price.
+
+A pill set across a two-line label is drawn tall enough to span both; a price on its
+own row is set at about the height of the line it belongs to.
+"""
+
 PRICE = re.compile(r"^[^\d]{0,4}(\d{2,5})(?:\.00?)?[^\d]{0,3}$")
 """A price: two to five digits with at most a little decoration. Bounded at five so a
 ten-digit phone number is never mistaken for one."""
@@ -141,9 +148,16 @@ def _has_own_price(box: Box, priced: list[Box], labels: list[Box]) -> bool:
     "Beside it" has to mean nearest, not merely level. A price set in a pill spanning a
     two-line label sits level with both lines, so testing for any price on the row would
     call every wrapped label a list.
+
+    And a price noticeably taller than the line is a price *for the group* - a pill
+    centred across a wrapped label - not that line's own. Without this the answer turns
+    on which of two lines the pill's centre happens to fall nearer, which is a few pixels
+    either way and flips between otherwise identical rows.
     """
     for price in priced:
         if price.x <= box.right or not _same_row(price, box):
+            continue
+        if price.height > box.height * SPANNING:
             continue
         rivals = [
             other
@@ -260,21 +274,41 @@ def _is_label(box: Box) -> bool:
 def _note_below(label: Box, boxes: list[Box]) -> str:
     """Small print sitting just under a service, such as what is included.
 
-    Only smaller text counts. A line the same size is the next service, and folding that
-    into the note would lose it from the list entirely.
+    Two things disqualify a line. Being the same size or larger means it is the next
+    service, not this one's footnote. Carrying a price of its own means the same thing
+    even more definitely - and that case is the one that bit: a service whose own note
+    says the name of the service below it puts that name on screen under the wrong price.
     """
+    priced = [b for b in boxes if _amount(b)]
+    labels = [b for b in boxes if not _amount(b)]
     below = [
         b
         for b in boxes
         if b is not label
         and label.y < b.y <= label.y + label.height * NOTE_GAP
-        and abs(b.x - label.x) < label.width
+        # Roughly the same left edge. Small print sits under its service; a centred
+        # section heading further along the row is not small print at all.
+        and abs(b.x - label.x) < label.width * 0.55
         and b.height < label.height * 0.95
         and not _amount(b)
+        and not _has_own_price(b, priced, labels)
+        and not _looks_like_a_heading(b)
     ]
     if not below:
         return ""
     return min(below, key=lambda b: b.y).cleaned
+
+
+def _looks_like_a_heading(box: Box) -> bool:
+    """Whether a line is a section title rather than small print.
+
+    Small print is set in sentence case - "(Uparlips Free)", "full hand, half leg". A
+    section heading is set in capitals. Using the casing avoids maintaining a list of
+    every heading a salon might print.
+    """
+    text = box.cleaned
+    letters = [c for c in text if c.isalpha()]
+    return bool(letters) and all(c.isupper() for c in letters) and len(text) < 26
 
 
 def _same_row(a: Box, b: Box) -> bool:
