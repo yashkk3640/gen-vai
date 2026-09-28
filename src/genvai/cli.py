@@ -23,6 +23,7 @@ from genvai.adapters.fs_store import FilesystemStore
 from genvai.adapters.images import image_provider
 from genvai.adapters.music_local import LocalMusicProvider
 from genvai.adapters.ollama import OllamaLLM
+from genvai.adapters.rapid_ocr import RapidOcrVision
 from genvai.config import load_settings
 from genvai.errors import GenvaiError, RenderError
 from genvai.pipeline.edit import edit as run_edit
@@ -31,11 +32,14 @@ from genvai.pipeline.music import approve as approve_music
 from genvai.pipeline.music import decline as decline_music
 from genvai.pipeline.music import suggest as suggest_music
 from genvai.pipeline.plan import plan as plan_idea
+from genvai.pipeline.promo import build as build_promo
+from genvai.pipeline.promo import choose as choose_offers
 from genvai.pipeline.render import plan_render
 from genvai.pipeline.render import render as render_timeline
 from genvai.pipeline.resolve import resolve_visuals
 from genvai.pipeline.select import make_reel
-from genvai.timeline import Canvas
+from genvai.promo import Brief
+from genvai.timeline import Canvas, Timeline
 
 app = typer.Typer(
     name="genvai",
@@ -283,6 +287,112 @@ def create(
 
 
 @app.command()
+def promo(
+    project: str = typer.Argument(..., help="Project id, or a new name."),
+    posters: list[Path] = typer.Argument(..., help="The offer artwork. PNG or JPEG."),
+    occasion: str = typer.Option("", "--occasion", help="'Raksha Bandhan offer'."),
+    business: str = typer.Option("", "--business", help="Whose offer it is."),
+    duration: float = typer.Option(0.0, "--duration", "-d", help="0 fits the offers."),
+    aspect: str = typer.Option("9:16", "--aspect", help="9:16, 16:9 or 1:1."),
+    featured: int = typer.Option(4, "--featured", help="How many offers get their own beat."),
+    seed: int = typer.Option(0, "--seed", help="0 picks a random seed and records it."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation."),
+) -> None:
+    """Make a reel from offer artwork - a poster, a price list, a flyer.
+
+    Reads the prices off the artwork, shows you what it read, and only builds once you
+    agree. Nothing here invents a price.
+    """
+    settings = load_settings()
+    store = FilesystemStore(settings.projects_dir)
+    created = store.create(occasion or f"promo from {posters[0].stem}", project)
+
+    reader = RapidOcrVision()
+    if not reader.is_available():
+        console.print(
+            "[red]OCR is not installed[/red] - it is what reads the prices off your "
+            "poster. Install it with: [bold]uv sync --extra ocr[/bold]"
+        )
+        raise typer.Exit(code=1)
+
+    brief = Brief(occasion=occasion, business=business)
+    with console.status("reading the artwork"):
+        for poster in posters:
+            brief = brief.merge(reader.read(poster))
+    brief = brief.model_copy(
+        update={
+            "occasion": occasion or brief.occasion,
+            "business": business or brief.business,
+        }
+    )
+
+    if not brief.is_usable:
+        console.print(
+            "[red]No prices found on that artwork.[/red] The reader needs printed text; "
+            "a photograph of a printed sheet often will not do."
+        )
+        raise typer.Exit(code=1)
+
+    featured_offers = choose_offers(brief.offers, featured)
+    table = Table(show_header=True, header_style="bold", title="what was read")
+    table.add_column("")
+    table.add_column("Service", overflow="fold")
+    table.add_column("Price", justify="right")
+    table.add_column("Note", overflow="fold")
+    for offer in brief.offers:
+        starred = "[green]*[/green]" if offer in featured_offers else " "
+        table.add_row(starred, offer.service, offer.price, offer.note)
+    console.print(table)
+    console.print(
+        f"[dim]* gets its own beat. {len(brief.offers)} offers, "
+        f"phone {brief.phone or 'not found'}.[/dim]"
+    )
+    console.print("[yellow]Check every price against the poster before this goes out.[/yellow]")
+
+    if not yes and not typer.confirm("Build the reel from this?", default=True):
+        console.print("[dim]Nothing built. Correct the artwork or pass the offers yourself.[/dim]")
+        return
+
+    timeline = build_promo(
+        brief,
+        tuple(posters),
+        store.project_dir(created.id) / "cache" / "promo",
+        canvas=_canvas_for(aspect),
+        seed=seed or _random_seed(),
+        featured=featured,
+        store_asset=lambda image, provenance: store.store_asset(
+            created.id, image, "image", provenance
+        ),
+    )
+    if duration > 0:
+        timeline = _scaled_to(timeline, duration)
+    store.save_timeline(created.id, timeline)
+
+    console.print(
+        f"[bold]{created.id}[/bold] v{timeline.version}  {len(timeline.scenes)} beats  "
+        f"{timeline.duration:.1f}s  {timeline.canvas.width}x{timeline.canvas.height}"
+    )
+    renderer = FFmpegRenderer(
+        settings.render, lambda asset_id: store.asset_path(created.id, asset_id)
+    )
+    try:
+        outputs = render_timeline(timeline, created.id, renderer, store)
+    except GenvaiError as exc:
+        console.print(f"[red]{exc}[/red]")
+        if isinstance(exc, RenderError) and exc.stderr:
+            console.print(f"[dim]{exc.stderr}[/dim]")
+        raise typer.Exit(code=1) from exc
+
+    for variant, path in outputs.items():
+        console.print(f"  [green]{variant}[/green]  {path}")
+    console.print()
+    console.print(
+        "[dim]Upload the silent cut and attach a trending sound in the app - a baked-in "
+        "track forfeits that reach.[/dim]"
+    )
+
+
+@app.command()
 def edit(
     project: str = typer.Argument(..., help="Project id."),
     request: str = typer.Argument(..., help="What to change, in plain language."),
@@ -510,6 +620,25 @@ def _canvas_for(aspect: str) -> Canvas:
     if aspect not in presets:
         console.print(f"[yellow]unknown aspect '{aspect}', using 9:16[/yellow]")
     return presets.get(aspect, presets["9:16"])
+
+
+def _scaled_to(timeline: Timeline, target: float) -> Timeline:
+    """Stretch or compress every beat to hit a requested length.
+
+    Uniform, so the pacing the beats were given is preserved rather than one shot being
+    made to absorb the whole difference.
+    """
+    if timeline.duration <= 0:
+        return timeline
+    factor = target / timeline.duration
+    return timeline.model_copy(
+        update={
+            "scenes": tuple(
+                s.model_copy(update={"duration": max(0.4, s.duration * factor)})
+                for s in timeline.scenes
+            )
+        }
+    )
 
 
 def _random_seed() -> int:

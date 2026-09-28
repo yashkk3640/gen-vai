@@ -33,6 +33,8 @@ genvai music trip --approve <id>        # use one, and cut to its beat
 genvai edit trip "drop the third clip"  # change it in plain English
 
 genvai create "why compound interest matters" -d 20   # no footage needed
+
+genvai promo gk offer.png --occasion "Diwali offer"   # a reel from a price list
 ```
 
 | Command | What it does | Ready |
@@ -47,6 +49,7 @@ genvai create "why compound interest matters" -d 20   # no footage needed
 | `restore` | Put back an earlier version | yes |
 | `music` | Suggest a track, approve one, align cuts to its beat | yes |
 | `create` | No footage? Make one from a description alone | yes |
+| `promo` | A reel from offer artwork — reads the prices off it | yes |
 
 A project is a plain folder under `projects/`. Open it and you can see every asset, every
 version of the edit, and every render. Copy it to another machine and it still works.
@@ -61,6 +64,8 @@ version of the edit, and every render. Copy it to another machine and it still w
 - **Use a 3B model.** A 9B one spills off a 4 GB card and times out - measurements in
   [docs/setup.md](docs/setup.md).
 - **Bring your own music.** Nothing ships with the project.
+- **`promo` shows you what it read before building.** OCR pairs a service to its
+  price by position, which is imperfect on unusual layouts. Check every price.
 
 Fuller list in [TODO.md](TODO.md).
 
