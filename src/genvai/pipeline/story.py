@@ -24,7 +24,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-from genvai.cast import Picture, find_cast
+from genvai.cast import Picture, find_cast, find_icons
 from genvai.errors import GenvaiError
 from genvai.ocr import Box, text_rects
 from genvai.palette import type_palette
@@ -55,11 +55,17 @@ def read_material(
     posters: tuple[Path, ...],
     boxes: tuple[tuple[Box, ...], ...],
     faces: FaceDetector | None,
+    *,
+    services: tuple[str, ...] = (),
+    photos: dict[str, Path] | None = None,
 ) -> Material:
     """Store the posters, erase their words, find their pictures and their colours.
 
     `boxes` are the OCR boxes already read for the brief - one tuple per poster - so the
-    artwork is read once, not twice.
+    artwork is read once, not twice. `services` are the names read off the price list;
+    the icon printed beside each is found and named after it. `photos` maps a service
+    name to a photograph the client supplied - their own work, and always preferred to
+    anything cut from a poster.
     """
     directory = _story_dir(store, project_id) / "plates"
     directory.mkdir(parents=True, exist_ok=True)
@@ -89,11 +95,39 @@ def read_material(
             p.model_copy(update={"id": f"{letter}{p.id[1:]}", "poster": index})
             for p in find_cast(clean, boxes=poster_boxes, faces=found, stubborn=stubborn)
         ]
+        cast += [
+            p.model_copy(update={"id": f"{letter}-{p.id}", "poster": index})
+            for p in find_icons(array, poster_boxes, services)
+        ]
         if palette is None:
             colours = type_palette(array, rects)
             palette = (_hex(colours.deep), _hex(colours.light), _hex(colours.accent))
         plates.append(plate)
         originals.append(original)
+
+    for number, (service, path) in enumerate((photos or {}).items(), start=1):
+        index = len(stored)
+        asset = store.store_asset(
+            project_id, path, "image", AssetProvenance(provider="user", prompt=path.name)
+        )
+        stored.append(asset.path)
+        with Image.open(path) as opened:
+            photo = opened.convert("RGB")
+        photo.save(directory / f"{index}.png")
+        plates.append(photo)
+        originals.append(photo)
+        cast.append(
+            Picture(
+                id=f"photo{number}",
+                poster=index,
+                rect=(0.0, 0.0, 1.0, 1.0),
+                kind="photo",
+                source="client",
+                name=" ".join(service.split()).lower(),
+                strength=100.0,
+                pixels=photo.size,
+            )
+        )
 
     return Material(
         posters=tuple(stored),

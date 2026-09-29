@@ -127,39 +127,52 @@ class _Casting:
         self._rng = rng
         self._last: str | None = None
         self._shown: dict[str, int] = {}
+        # A client's photo was given for one service, and is kept for it: never the
+        # opening image, never a filler close-up.
+        self._poster = [p for p in self._cast if p.source == "poster"]
 
     def hero(self) -> Picture | None:
         """The big picture a poster leads with - set near the top, and large."""
         # The logo portrait is the brand's sign-off, not the opening image.
-        big = [p for p in self._cast if p.pixels[0] * p.pixels[1] >= 240 * 240 and not _is_logo(p)]
+        big = [
+            p for p in self._poster if p.pixels[0] * p.pixels[1] >= 240 * 240 and not _is_logo(p)
+        ]
         return self._take(min(big, key=lambda p: p.rect[1]) if big else self._first())
 
     def people(self, count: int) -> list[Picture]:
         """Pictures of people, best first; photographs after them."""
-        ranked = [p for p in self._cast if p.kind == "portrait" and p.name] + [
-            p for p in self._cast if p.kind == "photo" and p.name
+        ranked = [p for p in self._poster if p.kind == "portrait" and p.name] + [
+            p for p in self._poster if p.kind == "photo" and p.name
         ]
-        ranked += [p for p in self._cast if p not in ranked and p.pixels[0] < 240]
+        ranked += [
+            p for p in self._poster if p not in ranked and p.pixels[0] < 240 and p.kind != "icon"
+        ]
         chosen = [p for p in ranked if p.id != self._last][:count]
         if chosen:
             self._last = chosen[-1].id
         return chosen
 
     def for_offer(self, offer: Offer) -> Picture | None:
-        """The picture named like the service, else the next that was not just shown."""
+        """The service's own picture, or none.
+
+        Its own means named like it: a photo the client supplied, a photo tile labelled
+        with it, or the icon the poster draws beside it. Photographs win over drawings,
+        and among equals the closest name wins - "gel polish hand" over "gel polish hand
+        toe". With nothing of its own a service gets no picture, and the shot is set on
+        brand colour: a pot and a diya under "WAX · Cream" told the viewer nothing, and
+        the client said so.
+        """
         wanted = _tokens(offer.service)
         named = [p for p in self._cast if p.name and wanted & _tokens(p.name)]
-        if named:
-            return self._take(named[0])
-        # Otherwise a person, the least recently shown - never the logo mid-story.
-        people = [p for p in self._cast if p.kind in ("portrait", "photo") and not _is_logo(p)]
-        pool = [p for p in people if p.id != self._last] or [
-            p for p in self._cast if p.id != self._last and not _is_logo(p)
-        ]
-        if not pool:
-            return self._take(None)
-        pick = min(pool, key=lambda p: (self._shown.get(p.id, 0), self._rng.random()))
-        return self._take(pick)
+        if not named:
+            return None
+
+        def fit(p: Picture) -> tuple[int, int, float]:
+            have = _tokens(p.name)
+            kind = {"photo": 3, "portrait": 3, "illustration": 2, "icon": 1}.get(p.kind, 0)
+            return (kind, len(wanted & have) - len(have - wanted), -self._shown.get(p.id, 0))
+
+        return self._take(max(named, key=fit))
 
     def brand(self) -> Picture | None:
         """The logo portrait - a face on bare paper - or else the hero."""
@@ -523,7 +536,9 @@ def _festival(brief: Brief) -> str:
 
 
 def _tokens(text: str) -> set[str]:
-    return {w for w in re.findall(r"[a-z0-9]+", text.lower()) if len(w) > 2}
+    """The words of a name, with a number split from the word it was run into."""
+    spaced = re.sub(r"(\d)([a-z])", r"\1 \2", text.lower())
+    return {w for w in re.findall(r"[a-z0-9]+", spaced) if len(w) > 2}
 
 
 def _merged(defaults: Copy, override: Copy | None) -> Copy:

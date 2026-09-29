@@ -414,3 +414,107 @@ def test_text_has_left_before_a_whip_takes_the_picture(small: Compositor) -> Non
     with_text = np.asarray(small.frame(stage, end, cut_in="cut", cut_out="whip"), dtype=float)
     without = np.asarray(small.frame(bare, end, cut_in="cut", cut_out="whip"), dtype=float)
     assert np.abs(with_text - without).mean() < 1.0
+
+
+# ------------------------------------------------------------------ service icons
+
+
+def _price_list_with_icons() -> tuple[np.ndarray, tuple[Box, ...]]:
+    """Paper; a ringed icon, a bullet, then 'WAX' and its price; a tagline with a
+    drawing beside it that is not a service."""
+    page_ = np.full((600, 800, 3), 248, dtype=np.uint8)
+    from PIL import ImageDraw
+
+    image = Image.fromarray(page_)
+    draw = ImageDraw.Draw(image)
+    draw.ellipse([60, 100, 150, 190], outline=(200, 150, 40), width=3)  # gold ring
+    draw.rectangle([90, 135, 120, 160], outline=(120, 20, 40), width=3)  # the bowl
+    draw.ellipse([180, 140, 186, 146], fill=(120, 20, 40))  # the list's bullet
+    draw.ellipse([60, 380, 150, 470], fill=(220, 30, 90))  # beside a tagline
+    boxes = (
+        Box(text="WAX", confidence=0.99, x=200, y=130, width=80, height=30),
+        Box(text="250", confidence=0.99, x=600, y=130, width=60, height=30),
+        Box(text="BEAUTY CARE", confidence=0.99, x=200, y=410, width=200, height=30),
+    )
+    return np.asarray(image), boxes
+
+
+def test_the_icon_beside_a_service_is_found_and_named_after_it() -> None:
+    from genvai.cast import find_icons
+
+    image, boxes = _price_list_with_icons()
+    icons = find_icons(image, boxes, ("WAX · Cream",))
+    assert [i.name for i in icons] == ["wax"]
+    x, y, w, h = icons[0].rect
+    assert x * 800 < 70 and (x + w) * 800 > 140, "the whole ring, not the bullet"
+
+
+def test_only_services_have_icons() -> None:
+    from genvai.cast import find_icons
+
+    image, boxes = _price_list_with_icons()
+    assert find_icons(image, boxes, ()) == ()
+
+
+def test_a_neighbouring_card_with_words_in_it_is_not_an_icon() -> None:
+    """In an add-on grid the drawing left of a label is the previous option's card."""
+    from genvai.cast import find_icons
+
+    image, boxes = _price_list_with_icons()
+    inside = Box(text="1 FINGER", confidence=0.99, x=80, y=140, width=50, height=12)
+    assert find_icons(image, (*boxes, inside), ("WAX",)) == ()
+
+
+def _offer_cast() -> tuple[Picture, ...]:
+    def pic(id_: str, kind: str, name: str, source: str = "poster") -> Picture:
+        return Picture(
+            id=id_,
+            rect=(0.1, 0.1, 0.2, 0.2),
+            kind=kind,  # type: ignore[arg-type]
+            name=name,
+            source=source,  # type: ignore[arg-type]
+            pixels=(900, 1600) if source == "client" else (130, 130),
+        )
+
+    return (
+        pic("hero", "illustration", ""),
+        pic("i1", "icon", "gel polish hand"),
+        pic("i2", "icon", "gel polish hand toe"),
+        pic("i3", "icon", "wax"),
+        pic("photo1", "photo", "gel polish", "client"),
+    )
+
+
+def _casting():
+    import random
+
+    from genvai.stories import _Casting
+
+    return _Casting(_offer_cast(), random.Random(0))
+
+
+def test_a_clients_photo_beats_the_posters_icon() -> None:
+    assert _casting().for_offer(Offer(service="GEL POLISH HAND", price="₹200")).id == "photo1"
+
+
+def test_the_closest_named_icon_wins() -> None:
+    cast = tuple(p for p in _offer_cast() if p.source == "poster")
+    import random
+
+    from genvai.stories import _Casting
+
+    picked = _Casting(cast, random.Random(0)).for_offer(Offer(service="GEL POLISH HAND", price="1"))
+    assert picked.id == "i1", "the bottle, not the foot"
+
+
+def test_a_list_item_takes_its_sections_icon() -> None:
+    assert _casting().for_offer(Offer(service="WAX · Cream", price="₹350")).id == "i3"
+
+
+def test_a_service_with_nothing_of_its_own_gets_no_picture() -> None:
+    """A pot and a diya under a service told the viewer nothing."""
+    assert _casting().for_offer(Offer(service="BLEACH", price="₹250")) is None
+
+
+def test_a_clients_photo_never_opens_the_reel() -> None:
+    assert _casting().hero().id == "hero"

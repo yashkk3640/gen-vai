@@ -21,7 +21,7 @@ from numpy.typing import NDArray
 from pydantic import Field
 
 from genvai.media import Face
-from genvai.ocr import Box
+from genvai.ocr import Box, join_wrapped
 from genvai.regions import PAPER_LUMA, PAPER_SATURATION, score
 from genvai.timeline import Frozen, Rect
 
@@ -37,6 +37,9 @@ MIN_SPREAD = 12.0
 PORTRAIT = 3.2
 """How much bigger than a face its portrait is taken to be, around it."""
 
+ICON_REACH = 5.0
+"""How far left of a service name, in line heights, its icon may start."""
+
 NAME_REACH = 0.25
 """How far left of a picture, as a fraction of the poster's width, its name may sit."""
 
@@ -44,7 +47,7 @@ ORNAMENT = 16.0
 """Picture strength under which it is decoration - mandala, a faint pattern. The dancer
 on the Navratri poster scores 23 for all the pale sky around her; mandalas 5-14."""
 
-Kind = Literal["photo", "portrait", "illustration", "ornament"]
+Kind = Literal["photo", "portrait", "illustration", "ornament", "icon"]
 
 
 class Picture(Frozen):
@@ -52,6 +55,9 @@ class Picture(Frozen):
 
     id: str
     poster: int = Field(default=0, description="Which poster it is on, by position.")
+    source: Literal["poster", "client"] = Field(
+        default="poster", description="Cut from a poster, or a photo the client gave for a service."
+    )
     rect: Rect = Field(description="Fractions of the poster.")
     kind: Kind
     name: str = Field(default="", description="The word printed beside it, lowercased.")
@@ -115,6 +121,136 @@ def find_cast(
 
     ranked = sorted(pictures, key=lambda p: -_rank(p))
     return tuple(p.model_copy(update={"id": f"p{i + 1}"}) for i, p in enumerate(ranked))
+
+
+def find_icons(
+    image: NDArray[np.uint8], boxes: tuple[Box, ...], services: tuple[str, ...]
+) -> tuple[Picture, ...]:
+    """The small drawing a price list sets beside each service - a wax bowl beside WAX,
+    a polish bottle beside GEL POLISH - named after that service.
+
+    These are the one picture a poster draws for every service, and exactly on topic.
+    They are line art on paper or a disc of colour, which the grid in `find_cast` passes
+    over, so they are looked for where they always are: just left of a service's name,
+    level with it, and close to it.
+
+    Only labels that are `services` - names already read off the price list - are
+    looked beside; a tagline or "FOR BOOKING" has no icon. `image` is the poster as
+    printed.
+    """
+    if image.ndim != 3 or image.size == 0:
+        return ()
+    height, width = image.shape[:2]
+    wanted = [_words(s) for s in services]
+    found: list[Picture] = []
+    for label in join_wrapped(list(boxes)):
+        name = " ".join(label.cleaned.strip(".:~-*·• ").split()).lower()
+        words = _words(name)
+        # A service, and one set in capitals: an item under a heading ("Diamond Facial")
+        # shares its heading's icon and has none of its own.
+        if not words or not any(words <= w or w <= words for w in wanted if w):
+            continue
+        if not _capitals(label.cleaned.strip(".:~-*·• ").split()[0]):
+            continue
+        rect = _icon_left_of(image, label)
+        # An icon has no words in it. A shape that holds some is a neighbouring option's
+        # card - "1 FINGER ART" and its photo, found beside "PAR FINGER ART".
+        if rect is None or any(
+            rect[0] <= b.x + b.width / 2 <= rect[2] and rect[1] <= b.middle <= rect[3]
+            for b in boxes
+            if b is not label
+        ):
+            continue
+        left, top, right, bottom = rect
+        found.append(
+            Picture(
+                id=f"i{len(found) + 1}",
+                rect=(left / width, top / height, (right - left) / width, (bottom - top) / height),
+                kind="icon",
+                name=name,
+                strength=score(image[top:bottom, left:right, :3]),
+                pixels=(right - left, bottom - top),
+            )
+        )
+    return tuple(found)
+
+
+def _icon_left_of(image: NDArray[np.uint8], label: Box) -> tuple[int, int, int, int] | None:
+    """The drawing just left of a label and level with it, or None if there is none.
+
+    Found as a connected shape - the ring round a line drawing, or the disc a white
+    drawing sits on - rather than by scanning rows: on a price list a margin ornament
+    and a rule run between the stacked icons, so no row ever comes up clear.
+    """
+    height, width = image.shape[:2]
+    line = min(label.height, 40.0)
+    reach_left = int(max(0, label.x - line * ICON_REACH))
+    reach_right = int(max(0, label.x - line * 0.15))
+    middle = label.y + min(label.height, line * 2) / 2
+    top = int(max(0, middle - line * 3))
+    bottom = int(min(height, middle + line * 3))
+    if reach_right - reach_left < line or bottom - top < line:
+        return None
+    window = image[top:bottom, reach_left:reach_right, :3].astype(np.float64)
+    luma = window @ np.array([0.299, 0.587, 0.114])
+    high, low = window.max(axis=-1), window.min(axis=-1)
+    saturation = (high - low) / np.maximum(high, 1.0)
+    ink = (luma < PAPER_LUMA - 20) | (saturation > 0.3)
+
+    best: tuple[float, tuple[int, int, int, int]] | None = None
+    for x0, y0, x1, y1 in _shapes(ink):
+        w, h = x1 - x0, y1 - y0
+        gap = reach_right - (reach_left + x1)
+        level = abs((top + (y0 + y1) / 2) - middle)
+        # A compact, roughly square mark two to five lines tall, level with the name and
+        # close to it. Measured: the bowl beside WAX is 1.6 lines off; in an add-on grid
+        # the previous option's photo sits 2.7 lines off and must never stand in.
+        if not (line * 1.3 <= w <= line * 5 and line * 1.3 <= h <= line * 5):
+            continue
+        if not 0.6 <= w / h <= 1.6 or gap > line * 2.0 or level > line * 1.3:
+            continue
+        if best is None or gap < best[0]:
+            best = (gap, (x0, y0, x1, y1))
+    if best is None:
+        return None
+    x0, y0, x1, y1 = best[1]
+    pad = int(line * 0.3)
+    return (
+        max(0, reach_left + x0 - pad),
+        max(0, top + y0 - pad),
+        min(width, reach_left + x1 + pad),
+        min(height, top + y1 + pad),
+    )
+
+
+def _shapes(mask: NDArray[np.bool_]) -> list[tuple[int, int, int, int]]:
+    """Bounding boxes (x0, y0, x1, y1) of 8-connected shapes in a small mask."""
+    seen = np.zeros_like(mask)
+    rows, columns = mask.shape
+    shapes: list[tuple[int, int, int, int]] = []
+    for y, x in zip(*np.nonzero(mask), strict=True):
+        if seen[y, x]:
+            continue
+        seen[y, x] = True
+        stack = [(y, x)]
+        y0 = y1 = y
+        x0 = x1 = x
+        while stack:
+            cy, cx = stack.pop()
+            y0, y1, x0, x1 = min(y0, cy), max(y1, cy), min(x0, cx), max(x1, cx)
+            for ny in (cy - 1, cy, cy + 1):
+                for nx in (cx - 1, cx, cx + 1):
+                    if 0 <= ny < rows and 0 <= nx < columns and mask[ny, nx] and not seen[ny, nx]:
+                        seen[ny, nx] = True
+                        stack.append((ny, nx))
+        shapes.append((int(x0), int(y0), int(x1) + 1, int(y1) + 1))
+    return shapes
+
+
+def _words(text: str) -> set[str]:
+    return {
+        w for w in "".join(c if c.isalnum() else " " for c in text.lower()).split() if len(w) > 2
+    }
 
 
 # ------------------------------------------------------------------------ finding
@@ -274,6 +410,8 @@ def _capitals(text: str) -> bool:
 
 def _rank(picture: Picture) -> float:
     """People first, then photographs, then the rest; big and colourful within each."""
-    weight = {"portrait": 3.0, "photo": 2.0, "illustration": 1.6, "ornament": 0.4}[picture.kind]
+    weight = {"portrait": 3.0, "photo": 2.0, "illustration": 1.6, "ornament": 0.4, "icon": 0.2}[
+        picture.kind
+    ]
     area = picture.rect[2] * picture.rect[3]
     return weight * picture.strength * (0.3 + area) ** 0.5

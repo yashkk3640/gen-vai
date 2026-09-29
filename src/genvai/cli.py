@@ -463,6 +463,11 @@ def story(
     notes: list[str] = typer.Option(
         None, "--note", help="SERVICE=note, e.g. 'ART=per finger'. Repeat for more."
     ),
+    pictures: list[str] = typer.Option(
+        None,
+        "--picture",
+        help="SERVICE=photo, e.g. 'GEL POLISH=nails.jpg': the client's own photo for it.",
+    ),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation."),
 ) -> None:
     """Design the reel before rendering it: a storyboard, and a storybook page to review.
@@ -513,7 +518,15 @@ def story(
     if llm is not None and not llm.is_available():
         llm = None
     with console.status("finding the pictures and drafting the story"):
-        material = read_material(created.id, store, tuple(posters), tuple(boxes), _faces(settings))
+        material = read_material(
+            created.id,
+            store,
+            tuple(posters),
+            tuple(boxes),
+            _faces(settings),
+            services=tuple(o.service for o in brief.offers),
+            photos=_parse_pictures(pictures or []),
+        )
         board = draft_story(
             created.id,
             store,
@@ -861,6 +874,18 @@ def _promo_music(
     return approve_music(
         project, store, provider, detector, choice.strip(), confirmed=True, gain_db=SOLE_TRACK_DB
     )
+
+
+def _parse_pictures(pairs: list[str]) -> dict[str, Path]:
+    parsed: dict[str, Path] = {}
+    for pair in pairs:
+        key, _, path = pair.partition("=")
+        photo = Path(path.strip())
+        if not key.strip() or not photo.is_file():
+            console.print(f"[red]--picture needs SERVICE=an existing image, got {pair!r}[/red]")
+            raise typer.Exit(code=1)
+        parsed[key.strip()] = photo
+    return parsed
 
 
 def _parse_notes(pairs: list[str]) -> dict[str, str]:
