@@ -70,6 +70,8 @@ Things that work as designed but that you should know before trusting the output
 - [x] Frame compositor: cards over blurred backdrops, parallax, petals, bokeh, light
       leaks, grain, animated type, whip / flash / zoom / fade cuts
 - [x] Storybook page; `genvai story` and `genvai shoot`; shots cached by content
+- [x] Legibility: contrast measured per caption and fixed (dark ink or plate), reading
+      time enforced, text kept out of transitions
 
 ## Storyboard - known gaps
 

@@ -26,6 +26,14 @@ STORYBOARD_SCHEMA_VERSION = 1
 FPS = 30
 """Frames per second a storyboard is drawn at."""
 
+TRANSITION = 0.16
+"""Seconds a whip, flash or zoom takes; a fade takes twice this."""
+
+READ_BASE = 0.45
+READ_PER_WORD = 0.24
+"""How long a caption must sit on screen, fully arrived, to be read: a glance to find it
+plus a quarter second a word. A caption shown for less was on screen, and unread."""
+
 Role = Literal["hook", "build", "reveal", "offer", "proof", "cta"]
 """What a shot does in the story. Hook stops the thumb; build creates the want; reveal
 pays it off; offer names a price; proof is the thing to screenshot; cta says how."""
@@ -106,3 +114,57 @@ class Storyboard(Frozen):
 
     def picture(self, picture_id: str | None) -> Picture | None:
         return next((p for p in self.cast if p.id == picture_id), None)
+
+    def dwell(self, index: int, caption: Caption) -> float:
+        """Seconds a caption sits on screen fully arrived and not yet leaving."""
+        shot = self.shots[index]
+        following = self.shots[index + 1].cut if index + 1 < len(self.shots) else None
+        leaving = transition_seconds(following) if following in ("whip", "fade") else 0.0
+        return (
+            self.seconds(shot)
+            - appears(caption, shot.cut if index else "cut", self.beat)
+            - entrance_seconds(caption)
+            - leaving
+        )
+
+    def paced(self) -> "Storyboard":
+        """Every shot lengthened, in half beats, until each of its captions can be read.
+
+        Cutting on the beat is kept - half a beat is still on the grid - but a caption
+        that is gone before it can be read is worse than a shot half a beat long.
+        """
+        shots = list(self.shots)
+        for index, shot in enumerate(shots):
+            board = self.model_copy(update={"shots": tuple(shots)})
+            short = max(
+                (reading_seconds(c) - board.dwell(index, c) for c in shot.captions),
+                default=0.0,
+            )
+            if short > 0:
+                extra = -(-short // (self.beat / 2)) * 0.5
+                shots[index] = shot.model_copy(update={"beats": shot.beats + extra})
+        return self.model_copy(update={"shots": tuple(shots)})
+
+
+def transition_seconds(cut: str | None) -> float:
+    if cut in (None, "cut"):
+        return 0.0
+    return TRANSITION * (2 if cut == "fade" else 1)
+
+
+def appears(caption: Caption, cut_in: str, beat: float) -> float:
+    """When a caption starts to arrive: on its beat, but never during the cut into the
+    shot - text smeared by a whip or washed out by a flash is not read."""
+    return max(caption.at * beat, transition_seconds(cut_in))
+
+
+def entrance_seconds(caption: Caption) -> float:
+    if caption.entrance == "type":
+        return 0.045 * len(caption.text)
+    if caption.entrance == "words":
+        return 0.22 * len(caption.text.split())
+    return {"pop": 0.3, "slide_up": 0.35, "fade": 0.5}.get(caption.entrance, 0.3)
+
+
+def reading_seconds(caption: Caption) -> float:
+    return READ_BASE + READ_PER_WORD * len(caption.text.split())

@@ -110,3 +110,15 @@ for motion graphics.
 The client chose not to film and not to use generated images. Poster photos are small
 (a tile is ~135 px), so they are never shown full screen: a card at no more than 5x,
 over a blurred, brand-tinted copy of itself, moving against it for parallax, with grain.
+
+### Every caption is measured, not trusted
+
+The compositor draws each shot without its text, samples what sits behind every caption
+as it arrives and as the shot ends, and computes the WCAG contrast ratio. Under 4.5:1 it
+tries the brand's deep colour as ink, then a soft plate. Measured before this existed:
+19 of 24 captions on the two Navratri reels were under 4.5:1, the worst at 1.0:1.
+Captions also must stay on screen, fully arrived, for 0.45 s plus 0.24 s a word; shots
+too short for their text are lengthened in half beats. Text never arrives during a cut
+into a shot and leaves before a whip or fade, so no transition smears it.
+**Rejected:** a fixed dark scrim on every shot - it flattens the pictures that did not
+need it, and still fails over a busy one.

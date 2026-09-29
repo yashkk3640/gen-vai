@@ -20,7 +20,7 @@ what has already been tried and rejected.
 | `genvai create` | a text description, no footage | works |
 
 Plus `edit` (change it in plain English), `restore`, `music`, `render`, `media`, `list`,
-`doctor`. Ten milestones M0–M9 complete. **643 tests passing**, ruff clean.
+`doctor`. Ten milestones M0–M9 complete. **667 tests passing**, ruff clean.
 
 Everything runs locally. Nothing is uploaded. The only network call is a music download,
 and that is confirmation-gated.
@@ -115,6 +115,8 @@ Each of these cost real time. They are in the code as comments, but collected he
   came out 6 dB under its own `gain_db`.
 - **Reels reserve the right 18% of the frame** for buttons (`safe_area.right`), so a
   centred line holds ~26 characters at 3% type. A price list needs two lines per item.
+- **Looking right on a monitor is not legible on a phone.** White type over the pale
+  dancer measured 1.1:1. Contrast is now measured per caption - see decisions.md.
 - **Rich crashes on `₹` when stdout is piped** on Windows (cp1252). Set
   `PYTHONIOENCODING=utf-8` when capturing CLI output.
 
@@ -195,7 +197,8 @@ Three things, **all fixed on 2026-09-29**:
 
 `beauty parlor/navratri offer/` holds the next job: two Navratri posters and a logo.
 Its `reel/` has six cuts: four from `promo`, and two from the storyboard layer (M9) -
-`navratri-beauty-STORY-glow-up` and `navratri-nails-STORY-countdown`, the better ones.
+`navratri-beauty-STORY-glow-up` and `navratri-nails-STORY-countdown`, the better ones
+(storyboard v5: every caption measured readable, and held long enough to read).
 
 ### M9: the storyboard layer
 

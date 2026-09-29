@@ -199,6 +199,11 @@ class ShotRenderer(Protocol):
         """One frame of a prepared shot, as a PIL image."""
         ...
 
+    def legibility(self, stage: Any) -> tuple[tuple[str, str, float, str], ...]:
+        """Each caption's text, role, contrast ratio against what is behind it, and the
+        fix applied to reach it."""
+        ...
+
     def render_shot(
         self, stage: Any, out: Path, *, frames: int, cut_in: str, cut_out: str | None
     ) -> Path: ...

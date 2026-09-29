@@ -522,7 +522,7 @@ def story(
             on_note=lambda note: console.print(f"[yellow]{note}[/yellow]"),
         )
     with console.status("drawing a key frame per shot"):
-        book = make_storybook(
+        book, checks = make_storybook(
             created.id, store, Compositor(resolve_ffmpeg(), width=720, height=1280)
         )
 
@@ -546,6 +546,7 @@ def story(
         f"{len(board.shots)} shots  {board.duration:.1f}s at {board.bpm:.0f} bpm"
     )
     console.print(f"[dim]{board.logline}[/dim]")
+    _report_legibility(checks)
     console.print(f"  storybook  {book}")
     console.print(f"[dim]Render it with: genvai shoot {created.id}[/dim]")
 
@@ -857,6 +858,30 @@ def _promo_music(
     return approve_music(
         project, store, provider, detector, choice.strip(), confirmed=True, gain_db=SOLE_TRACK_DB
     )
+
+
+def _report_legibility(checks: dict[str, tuple[tuple[str, str, float, str], ...]]) -> None:
+    """Say whether every caption can be read, and list any that cannot."""
+    lines = [
+        (shot, text, ratio, fix)
+        for shot, captions in checks.items()
+        for text, role, ratio, fix in captions
+        if role != "price"
+    ]
+    if not lines:
+        return
+    weak = [line for line in lines if line[2] < 4.5]
+    fixed = sum(1 for line in lines if line[3] != "as designed")
+    worst = min(line[2] for line in lines)
+    if weak:
+        console.print(f"[red]{len(weak)} caption(s) may be hard to read:[/red]")
+        for shot, text, ratio, _ in weak:
+            console.print(f"  {shot}  {ratio:.1f}:1  {text!r}")
+    else:
+        console.print(
+            f"[green]All {len(lines)} captions readable[/green] - lowest contrast "
+            f"{worst:.1f}:1; {fixed} needed a plate or dark ink."
+        )
 
 
 def _faces(settings: Settings) -> YunetFaces:

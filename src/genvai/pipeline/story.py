@@ -165,16 +165,28 @@ def write_copy(
     )
 
 
-def storybook(project_id: str, store: ProjectStore, compositor: ShotRenderer) -> Path:
-    """Render a key frame per shot and write the review page. Returns the page's path."""
+Legibility = tuple[str, str, float, str]
+"""A caption's text, role, contrast ratio, and what was done to make it readable."""
+
+
+def storybook(
+    project_id: str, store: ProjectStore, compositor: ShotRenderer
+) -> tuple[Path, dict[str, tuple[Legibility, ...]]]:
+    """Render a key frame per shot and write the review page.
+
+    Returns the page's path and, per shot, how readable each caption is - measured
+    against the frame behind it, after any fix the compositor applied.
+    """
     board = load(store, project_id)
     plates, originals = _pictures(store, project_id, board)
     frames_dir = _story_dir(store, project_id) / "frames"
     frames_dir.mkdir(parents=True, exist_ok=True)
 
     frames: dict[str, str] = {}
+    checks: dict[str, tuple[Legibility, ...]] = {}
     for shot in board.shots:
         stage = compositor.stage(board, shot, plates, originals)
+        checks[shot.id] = compositor.legibility(stage)
         moment = _key_moment(board, shot)
         image = compositor.frame(stage, moment, cut_in="cut", cut_out=None)
         name = f"v{board.version}-{shot.id}.jpg"
@@ -182,8 +194,8 @@ def storybook(project_id: str, store: ProjectStore, compositor: ShotRenderer) ->
         frames[shot.id] = f"frames/{name}"
 
     out = _story_dir(store, project_id) / "storybook.html"
-    out.write_text(page(board, frames), encoding="utf-8", newline="\n")
-    return out
+    out.write_text(page(board, frames, checks), encoding="utf-8", newline="\n")
+    return out, checks
 
 
 def shoot(
@@ -306,7 +318,7 @@ def _shot_key(
     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:24]
 
 
-ENGINE_VERSION = 2
+ENGINE_VERSION = 4
 """Bumped when the compositor's drawing changes, so cached shots are not reused stale."""
 
 

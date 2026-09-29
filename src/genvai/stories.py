@@ -113,7 +113,7 @@ def draft(
         cast=cast,
         palette=palette,
         shots=tuple(s.model_copy(update={"id": f"s{i + 1}"}) for i, s in enumerate(shots)),
-    )
+    ).paced()
 
 
 # ------------------------------------------------------------------------ casting

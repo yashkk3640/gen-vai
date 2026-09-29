@@ -17,7 +17,7 @@ against it - and a little grain hides the softness a 4x enlargement cannot avoid
 import math
 import random
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import numpy as np
@@ -25,7 +25,16 @@ from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
 
 from genvai.errors import RenderError
 from genvai.fonts import resolve as resolve_font
-from genvai.storyboard import FPS, Caption, Cut, Shot, Storyboard
+from genvai.storyboard import (
+    FPS,
+    TRANSITION,
+    Caption,
+    Cut,
+    Shot,
+    Storyboard,
+    appears,
+    transition_seconds,
+)
 
 SAFE_TOP = 0.10
 SAFE_BOTTOM = 0.80
@@ -39,8 +48,15 @@ CENTRE_X = (SAFE_LEFT + SAFE_RIGHT) / 2
 MAX_ENLARGE = 5.0
 """A picture is never shown at more than this multiple of its size on the poster."""
 
-TRANSITION = 0.22
-"""Seconds a whip, flash or zoom takes."""
+
+MIN_CONTRAST = 4.5
+"""The WCAG ratio for body text. A caption behind which the frame is lighter than this
+allows gets a plate. Measured before plates existed: the white kicker over the pale
+dancer backdrop scored 1.1:1 - there, but unreadable."""
+
+PLATE_ALPHA = 0.72
+"""How opaque a caption's plate is. Enough that white text clears 4.5:1 over pure white
+paper behind it, measured, while the picture still shows through at the edges."""
 
 
 @dataclass(frozen=True)
@@ -72,6 +88,8 @@ class _Sprite:
     centre: tuple[float, float]
     appears: float
     prefixes: tuple[Image.Image, ...]
+    contrast: float = 21.0
+    treatment: str = "as designed"
 
 
 @dataclass(frozen=True)
@@ -119,6 +137,13 @@ class Compositor:
 
     def frame(self, stage: Stage, t: float, *, cut_in: Cut, cut_out: Cut | None) -> Image.Image:
         return _draw(stage, t, cut_in, cut_out)
+
+    def legibility(self, stage: Stage) -> tuple[tuple[str, str, float, str], ...]:
+        """Each caption's text, role, contrast ratio against what is behind it, and what
+        was done to get it there: "as designed", "dark ink" or "plate"."""
+        return tuple(
+            (s.caption.text, s.caption.role, s.contrast, s.treatment) for s in stage.sprites
+        )
 
     def render_shot(
         self, stage: Stage, out: Path, *, frames: int, cut_in: Cut, cut_out: Cut | None
@@ -279,10 +304,12 @@ def _prepare(
     else:
         backdrop = _title_backdrop(width, height, deep, accent)
 
-    sprites = tuple(
-        _sprite(c, shot, board, width, height, deep, light, accent, bold, semibold)
-        for c in shot.captions
-    )
+    def make(caption: Caption, treatment: str) -> _Sprite:
+        return _sprite(
+            caption, shot, board, width, height, deep, light, accent, bold, semibold, treatment
+        )
+
+    sprites = tuple(make(c, "as designed") for c in shot.captions)
 
     particles: list[_Particle] = []
     if "petals" in shot.effects:
@@ -290,7 +317,7 @@ def _prepare(
     if "bokeh" in shot.effects:
         particles += [_particle("bokeh", rng) for _ in range(12)]
 
-    return Stage(
+    stage = Stage(
         width=width,
         height=height,
         seconds=board.seconds(shot),
@@ -308,6 +335,105 @@ def _prepare(
         leak=_leak(width, height, accent) if "light_leak" in shot.effects else None,
         grain=_grain(width, height, rng) if "grain" in shot.effects else (),
     )
+    return _legible(stage, make, deep)
+
+
+def _legible(stage: Stage, make, deep: tuple[int, int, int]) -> Stage:  # noqa: ANN001
+    """Measure every caption against the frame behind it, and fix the ones that fail.
+
+    The frame is drawn without text at two moments - as the caption arrives and at the
+    end of the shot, since the camera keeps moving. Light text is judged against the
+    brightest tenth of the ground under it, dark text against the darkest tenth.
+
+    Fixes are tried in order of how little they change the design: the text as drawn;
+    the same text in the brand's deep colour, which on a pale scene reads better than
+    any box; and last a plate behind it.
+    """
+    bare = replace(stage, sprites=(), grain=())
+    checked: list[_Sprite] = []
+    for sprite in stage.sprites:
+        if sprite.caption.role == "price":
+            checked.append(sprite)  # set on its own pill: contrast is fixed by design
+            continue
+        moments = (min(stage.seconds * 0.95, sprite.appears + 0.3), stage.seconds * 0.95)
+        grounds = [_ground(bare, sprite, t) for t in moments]
+        brightest = max(g[1] for g in grounds)
+        darkest = min(g[0] for g in grounds)
+
+        contrast = _ratio(_text_luminance(sprite), brightest)
+        if contrast >= MIN_CONTRAST:
+            checked.append(replace(sprite, contrast=contrast))
+            continue
+
+        inked = make(sprite.caption, "dark ink")
+        dark = _ratio(_text_luminance(inked, darkest_fill=True), darkest)
+        if dark >= MIN_CONTRAST:
+            checked.append(replace(inked, contrast=dark, treatment="dark ink"))
+            continue
+
+        plated_ground = _luminance_of(
+            tuple(PLATE_ALPHA * d + (1 - PLATE_ALPHA) * 255 * _to_srgb(brightest) for d in deep)
+        )
+        checked.append(
+            replace(
+                make(sprite.caption, "plate"),
+                contrast=_ratio(_text_luminance(sprite), plated_ground),
+                treatment="plate",
+            )
+        )
+    return replace(stage, sprites=tuple(checked))
+
+
+def _ground(bare: Stage, sprite: _Sprite, t: float) -> tuple[float, float]:
+    """Relative luminance of the darkest and brightest tenths of the frame under a
+    caption."""
+    frame = _draw(bare, t, "cut", None)
+    w, h = sprite.image.size
+    cx, cy = sprite.centre[0] * bare.width, sprite.centre[1] * bare.height
+    box = (
+        max(0, int(cx - w / 2)),
+        max(0, int(cy - h / 2)),
+        min(bare.width, int(cx + w / 2)),
+        min(bare.height, int(cy + h / 2)),
+    )
+    pixels = np.asarray(frame.crop(box), dtype=np.float64).reshape(-1, 3) / 255.0
+    if not pixels.size:
+        return 0.0, 0.0
+    linear = np.where(pixels <= 0.04045, pixels / 12.92, ((pixels + 0.055) / 1.055) ** 2.4)
+    luminance = linear @ np.array([0.2126, 0.7152, 0.0722])
+    return float(np.percentile(luminance, 10)), float(np.percentile(luminance, 90))
+
+
+def _text_luminance(sprite: _Sprite, *, darkest_fill: bool = False) -> float:
+    """The luminance of the caption's fill: its most opaque pixels, taking the brightest
+    fifth for light text or the darkest fifth for dark - which leaves out the stroke."""
+    array = np.asarray(sprite.image, dtype=np.float64)
+    solid = array[array[:, :, 3] > 250][:, :3]
+    if not solid.size:
+        return 1.0
+    sums = solid.sum(axis=1)
+    fill = (
+        solid[sums <= np.percentile(sums, 20)]
+        if darkest_fill
+        else solid[sums >= np.percentile(sums, 80)]
+    )
+    return _luminance_of(tuple(fill.mean(axis=0)))
+
+
+def _luminance_of(colour: tuple[float, ...]) -> float:
+    rgb = np.array(colour[:3], dtype=np.float64) / 255.0
+    linear = np.where(rgb <= 0.04045, rgb / 12.92, ((rgb + 0.055) / 1.055) ** 2.4)
+    return float(linear @ np.array([0.2126, 0.7152, 0.0722]))
+
+
+def _to_srgb(luminance: float) -> float:
+    """Luminance back to an sRGB fraction, near enough to blend a plate over it."""
+    return 12.92 * luminance if luminance <= 0.0031308 else 1.055 * luminance ** (1 / 2.4) - 0.055
+
+
+def _ratio(a: float, b: float) -> float:
+    high, low = max(a, b), min(a, b)
+    return (high + 0.05) / (low + 0.05)
 
 
 def _crop(
@@ -443,18 +569,33 @@ def _sprite(
     accent: tuple[int, int, int],
     bold: Path | None,
     semibold: Path | None,
+    treatment: str = "as designed",
 ) -> _Sprite:
+    # Kicker and footer were 3.3% and 2.9% of the height: legible on a monitor, thin on a
+    # phone held at arm's length. Raised to where a stroke still fits inside the letters.
     size_pct, font_path, fill, pill = {
-        "kicker": (3.3, bold, light, False),
+        "kicker": (3.8, bold, light, False),
         "headline": (7.0, bold, (255, 255, 255), False),
         "price": (6.4, bold, (255, 255, 255), True),
-        "footer": (2.9, semibold, (255, 245, 240), False),
+        "footer": (3.3, bold, (255, 245, 240), False),
     }[caption.role]
     if shot.layout == "title" and caption.role == "kicker":
         size_pct = 4.2
     size = round(height * size_pct / 100)
     text = caption.text.upper() if caption.role in ("kicker", "price") else caption.text
-    render = _text_renderer(size, font_path, fill, deep, accent if pill else None, width)
+    edge = deep
+    if treatment == "dark ink" and not pill:
+        fill, edge = deep, (255, 255, 255)
+    render = _text_renderer(
+        size,
+        font_path,
+        fill,
+        edge,
+        accent if pill else None,
+        width,
+        deep if treatment == "plate" else None,
+        shadowed=treatment != "dark ink",
+    )
     image = render(text)
     prefixes: tuple[Image.Image, ...] = ()
     if caption.entrance == "type":
@@ -466,7 +607,7 @@ def _sprite(
         caption=caption,
         image=image,
         centre=(CENTRE_X, _row(caption.role, shot.layout)),
-        appears=caption.at * board.beat,
+        appears=appears(caption, shot.cut, board.beat),
         prefixes=prefixes,
     )
 
@@ -489,9 +630,12 @@ def _text_renderer(
     edge: tuple[int, int, int],
     pill: tuple[int, int, int] | None,
     width: int,
+    plate: tuple[int, int, int] | None = None,
+    *,
+    shadowed: bool = True,
 ):
     font = ImageFont.truetype(str(font_path), size) if font_path else ImageFont.load_default(size)
-    stroke = 0 if pill else max(2, size // 11)
+    stroke = 0 if pill else max(3, size // 9)
     limit = width * (SAFE_RIGHT - SAFE_LEFT) * 0.96
 
     def render(text: str) -> Image.Image:
@@ -512,7 +656,17 @@ def _text_renderer(
                 radius=size // 3,
                 fill=(*pill, 255),
             )
-        else:
+        elif plate:
+            # A soft plate in the brand's deep colour: the caption's own ground, carried
+            # with it, so it reads over whatever the picture is doing behind.
+            band = Image.new("L", (w, h), 0)
+            ImageDraw.Draw(band).rounded_rectangle(
+                [shadow_pad // 2, shadow_pad // 2, w - shadow_pad // 2, h - shadow_pad // 2],
+                radius=size // 2,
+                fill=int(255 * PLATE_ALPHA),
+            )
+            image.paste((*plate, 255), (0, 0), band.filter(ImageFilter.GaussianBlur(size // 10)))
+        elif shadowed:
             shadow = Image.new("L", (w, h), 0)
             shadow_draw = ImageDraw.Draw(shadow)
             for i, line in enumerate(lines):
@@ -664,11 +818,18 @@ def _draw(stage: Stage, t: float, cut_in: Cut, cut_out: Cut | None) -> Image.Ima
     if stage.vignette is not None:
         frame = Image.alpha_composite(frame, stage.vignette)
 
-    for sprite in stage.sprites:
-        _place_sprite(frame, sprite, t, width, height)
-
-    image = frame.convert("RGB")
-    image = _transitioned(image, t, stage.seconds, cut_in, cut_out)
+    # The transition acts on the picture; the text is drawn over it afterwards, so a
+    # whip never smears it. Text leaves by fading out before a whip or fade takes the
+    # picture away.
+    image = _transitioned(frame.convert("RGB"), t, stage.seconds, cut_in, cut_out)
+    leaving = transition_seconds(cut_out) if cut_out in ("whip", "fade") else 0.0
+    remaining = stage.seconds - t
+    presence = 1.0 if leaving == 0 or remaining >= leaving else max(0.0, remaining / leaving)
+    if presence > 0 and stage.sprites:
+        frame = image.convert("RGBA")
+        for sprite in stage.sprites:
+            _place_sprite(frame, sprite, t, width, height, presence)
+        image = frame.convert("RGB")
     if stage.grain:
         tile = stage.grain[int(t * FPS) % len(stage.grain)]
         array = np.asarray(image, dtype=np.float32) + tile[:, :, None]
@@ -776,7 +937,14 @@ def _with_leak(frame: Image.Image, stage: Stage, t: float) -> Image.Image:
     return Image.blend(frame.convert("RGB"), lit, strength).convert("RGBA")
 
 
-def _place_sprite(frame: Image.Image, sprite: _Sprite, t: float, width: int, height: int) -> None:
+def _place_sprite(
+    frame: Image.Image,
+    sprite: _Sprite,
+    t: float,
+    width: int,
+    height: int,
+    presence: float = 1.0,
+) -> None:
     u = t - sprite.appears
     if u < 0:
         return
@@ -806,6 +974,7 @@ def _place_sprite(frame: Image.Image, sprite: _Sprite, t: float, width: int, hei
             (max(1, round(image.width * scale)), max(1, round(image.height * scale))),
             Image.BILINEAR,
         )
+    alpha *= presence
     if alpha < 1.0:
         faded = image.copy()
         faded.putalpha(image.getchannel("A").point(lambda a: int(a * alpha)))
@@ -843,12 +1012,25 @@ def _cut_effect(image: Image.Image, cut: Cut, k: float, *, entering: bool) -> Im
         travel = (1 - _ease(k)) if entering else _ease(k)
         shift = int(width * 0.35 * travel) * (1 if entering else -1)
         array = np.asarray(image, dtype=np.float32)
-        blurred = sum(np.roll(array, shift + i * width // 60, axis=1) for i in range(-3, 4)) / 7
+        # Shifted with the edge held, not rolled: a roll wraps the far edge round and
+        # left ghost copies of the picture on the near one.
+        blurred = sum(_shifted(array, shift + i * width // 60) for i in range(-3, 4)) / 7
         return Image.fromarray(blurred.astype(np.uint8), "RGB")
     return image
 
 
 # ------------------------------------------------------------------------- helpers
+
+
+def _shifted(array: np.ndarray, shift: int) -> np.ndarray:
+    """The image moved sideways by `shift` pixels, its edge column filling the gap."""
+    width = array.shape[1]
+    shift = max(-width + 1, min(width - 1, shift))
+    if shift > 0:
+        return np.concatenate([np.repeat(array[:, :1], shift, axis=1), array[:, :-shift]], axis=1)
+    if shift < 0:
+        return np.concatenate([array[:, -shift:], np.repeat(array[:, -1:], -shift, axis=1)], axis=1)
+    return array
 
 
 def _ease(x: float) -> float:

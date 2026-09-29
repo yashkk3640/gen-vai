@@ -5,6 +5,7 @@ Synthetic posters with pictures in known places, so "did it find the makeup phot
 an answer rather than an opinion.
 """
 
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -299,3 +300,117 @@ def test_a_shot_encodes(tmp_path: Path, ffmpeg_binary: Path) -> None:
     stage = compositor.stage(board, board.shots[0], (Image.fromarray(_poster()),), ())
     out = compositor.render_shot(stage, tmp_path / "s1.mp4", frames=6, cut_in="cut", cut_out=None)
     assert out.stat().st_size > 0
+
+
+# ---------------------------------------------------------------------- legibility
+
+
+def _one_caption_board(
+    background: tuple[int, int, int], role: str = "kicker"
+) -> tuple[Storyboard, Image.Image]:
+    """A board whose only picture is a flat colour, filling the frame."""
+    board = _board("glow-up")
+    picture = next(p for p in board.cast if p.name == "makeup")
+    shot = Shot(
+        id="s1",
+        role="hook",
+        beats=4,
+        layout="full",
+        picture=picture.id,
+        move="static",
+        captions=(Caption(text="READY TO GLOW", role=role, entrance="pop"),),
+    )
+    return board.model_copy(update={"shots": (shot,)}), Image.new("RGB", (1024, 1536), background)
+
+
+@pytest.mark.parametrize(
+    "background", [(255, 255, 255), (250, 230, 235), (120, 20, 40), (20, 20, 20)]
+)
+@pytest.mark.parametrize("role", ["kicker", "headline", "footer"])
+def test_every_caption_is_readable_whatever_is_behind_it(
+    small: Compositor, background: tuple[int, int, int], role: str
+) -> None:
+    board, plate = _one_caption_board(background, role)
+    stage = small.stage(board, board.shots[0], (plate,), (plate,))
+    ((_, _, ratio, _),) = small.legibility(stage)
+    assert ratio >= 4.5
+
+
+def test_light_text_over_a_dark_picture_is_left_alone(small: Compositor) -> None:
+    board, plate = _one_caption_board((40, 10, 20))
+    stage = small.stage(board, board.shots[0], (plate,), (plate,))
+    assert small.legibility(stage)[0][3] == "as designed"
+
+
+def test_over_pale_paper_the_text_turns_dark(small: Compositor) -> None:
+    """On a pale scene dark ink reads better than any box."""
+    board, plate = _one_caption_board((252, 248, 246))
+    stage = small.stage(board, board.shots[0], (plate,), (plate,))
+    assert small.legibility(stage)[0][3] == "dark ink"
+
+
+def test_over_a_busy_picture_the_text_gets_a_plate(small: Compositor) -> None:
+    """Neither light nor dark text reads over something both light and dark."""
+    board, _ = _one_caption_board((0, 0, 0))
+    stripes = np.zeros((1536, 1024, 3), dtype=np.uint8)
+    stripes[:, ::8] = 255
+    stripes[:, 1::8] = 255
+    stripes[:, 2::8] = 255
+    plate = Image.fromarray(stripes)
+    stage = small.stage(board, board.shots[0], (plate,), (plate,))
+    assert small.legibility(stage)[0][3] == "plate"
+
+
+def test_the_storybook_shows_each_captions_contrast() -> None:
+    board = _board("glow-up")
+    first = board.shots[0]
+    checks = {first.id: tuple((c.text, c.role, 6.2, "plate") for c in first.captions)}
+    html = page(board, {}, checks)
+    assert "6.2:1" in html and "plate" in html
+
+
+# ------------------------------------------------------------------- reading time
+
+
+@pytest.mark.parametrize("arc", ARC_NAMES)
+def test_every_caption_stays_long_enough_to_read(arc: str) -> None:
+    from genvai.storyboard import reading_seconds
+
+    board = _board(arc)
+    for index, shot in enumerate(board.shots):
+        for caption in shot.captions:
+            assert board.dwell(index, caption) >= reading_seconds(caption) - 1e-9, (
+                shot.id,
+                caption.text,
+            )
+
+
+def test_pacing_lengthens_in_half_beats() -> None:
+    board = _board("glow-up")
+    assert all((shot.beats * 2) == int(shot.beats * 2) for shot in board.shots)
+
+
+def test_text_never_arrives_during_the_cut_into_a_shot() -> None:
+    from genvai.storyboard import TRANSITION, appears
+
+    assert appears(Caption(text="X", at=0.0), "whip", 0.5) == TRANSITION
+    assert appears(Caption(text="X", at=0.0), "cut", 0.5) == 0.0
+    assert appears(Caption(text="X", at=2.0), "whip", 0.5) == 1.0
+
+
+def test_a_whip_does_not_wrap_the_far_edge_round() -> None:
+    from genvai.adapters.compositor import _shifted
+
+    row = np.arange(10, dtype=np.float32).reshape(1, 10, 1)
+    assert list(_shifted(row, 3)[0, :, 0]) == [0, 0, 0, 0, 1, 2, 3, 4, 5, 6]
+    assert list(_shifted(row, -3)[0, :, 0]) == [3, 4, 5, 6, 7, 8, 9, 9, 9, 9]
+
+
+def test_text_has_left_before_a_whip_takes_the_picture(small: Compositor) -> None:
+    board, plate = _one_caption_board((40, 10, 20))
+    stage = small.stage(board, board.shots[0], (plate,), (plate,))
+    end = board.seconds(board.shots[0]) - 0.001
+    bare = replace(stage, sprites=())
+    with_text = np.asarray(small.frame(stage, end, cut_in="cut", cut_out="whip"), dtype=float)
+    without = np.asarray(small.frame(bare, end, cut_in="cut", cut_out="whip"), dtype=float)
+    assert np.abs(with_text - without).mean() < 1.0

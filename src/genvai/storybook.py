@@ -37,12 +37,22 @@ _WORDS = {
 }
 
 
-def page(board: Storyboard, frames: dict[str, str]) -> str:
-    """The storybook for `board`. `frames` maps shot id to a key frame's relative path."""
+READABLE = 4.5
+"""The contrast ratio a caption must reach - WCAG's figure for body text."""
+
+
+def page(
+    board: Storyboard,
+    frames: dict[str, str],
+    checks: dict[str, tuple[tuple[str, str, float, str], ...]] | None = None,
+) -> str:
+    """The storybook for `board`. `frames` maps shot id to a key frame's relative path;
+    `checks` maps it to each caption's measured legibility."""
+    checks = checks or {}
     deep, light, accent = board.palette
     starts = _starts(board)
     cards = "\n".join(
-        _card(board, shot, index, starts[index], frames.get(shot.id, ""))
+        _card(board, shot, index, starts[index], frames.get(shot.id, ""), checks.get(shot.id, ()))
         for index, shot in enumerate(board.shots)
     )
     return _TEMPLATE.format(
@@ -90,17 +100,27 @@ def _legend() -> str:
     )
 
 
-def _card(board: Storyboard, shot: Shot, index: int, start: float, frame: str) -> str:
+def _card(
+    board: Storyboard,
+    shot: Shot,
+    index: int,
+    start: float,
+    frame: str,
+    checks: tuple[tuple[str, str, float, str], ...] = (),
+) -> str:
     seconds = board.seconds(shot)
     image = (
         f'<img src="{escape(frame)}" alt="Key frame of {escape(shot.id)}">'
         if frame
         else '<div class="noframe">no frame</div>'
     )
+    measured = {(text, role): (ratio, fix) for text, role, ratio, fix in checks}
     captions = (
         "".join(
             f"<li><b>{escape(c.text)}</b> <em>{c.role} · {_word(c.entrance)}"
-            f"{f' at beat {c.at:g}' if c.at else ''}</em></li>"
+            f"{f' at beat {c.at:g}' if c.at else ''}</em>"
+            f"{_readability(*measured[(c.text, c.role)]) if (c.text, c.role) in measured else ''}"
+            "</li>"
             for c in shot.captions
         )
         or "<li><em>no text</em></li>"
@@ -135,6 +155,16 @@ def _card(board: Storyboard, shot: Shot, index: int, start: float, frame: str) -
     <p class="note">{escape(shot.note)}</p>
   </div>
 </article>"""
+
+
+def _readability(ratio: float, fix: str) -> str:
+    good = ratio >= READABLE
+    note = "" if fix == "as designed" else f" · {escape(fix)}"
+    return (
+        f' <span class="read {"ok" if good else "bad"}" '
+        f'title="Contrast against the picture behind it">'
+        f"{'✓' if good else '✗'} {ratio:.1f}:1{note}</span>"
+    )
 
 
 def _word(value: str) -> str:
@@ -198,6 +228,9 @@ dd {{ margin: 0; }}
 .chips {{ display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 8px; }}
 .chip {{ font-size: 11px; background: #ffffff12; border: 1px solid var(--line);
   border-radius: 999px; padding: 1px 8px; color: var(--muted); }}
+.read {{ font-size: 11px; border-radius: 4px; padding: 0 5px; white-space: nowrap; }}
+.read.ok {{ background: #1e3b2a; color: #9be3b4; }}
+.read.bad {{ background: #4a1c1c; color: #ffb3b3; }}
 .note {{ margin: 0; font-size: 13px; color: var(--light); opacity: .85; font-style: italic; }}
 @media (max-width: 520px) {{
   .shots {{ grid-template-columns: 1fr; }}
