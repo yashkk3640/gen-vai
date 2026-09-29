@@ -23,7 +23,7 @@ from PIL import Image, ImageDraw, ImageFilter
 from genvai.errors import GenvaiError
 from genvai.palette import Brand, brand
 from genvai.ports import FaceDetector
-from genvai.promo import Brief, Offer
+from genvai.promo import Brief, Offer, choose
 from genvai.regions import erase_text, photo_regions
 from genvai.timeline import (
     Asset,
@@ -170,25 +170,6 @@ def build(
         # from attaching a trending sound in the app. Snapping is a no-op until then.
         export=Export(audio_variants=("silent",), snap_cuts_to_beat=True),
     )
-
-
-def choose(offers: tuple[Offer, ...], count: int = FEATURED) -> tuple[Offer, ...]:
-    """Which offers earn a beat.
-
-    The cheapest leads, because a low number is what stops a thumb. After that the list
-    is spread rather than sorted - four prices in ascending order reads as a list, while
-    four spaced across the menu reads as a range of what the place does.
-    """
-    if not offers:
-        return ()
-    ranked = sorted(offers, key=lambda o: (_number(o.price), o.service))
-    if len(ranked) <= count:
-        return tuple(ranked)
-
-    cheapest, rest = ranked[0], ranked[1:]
-    step = max(1, len(rest) // max(1, count - 1))
-    spread = [rest[i] for i in range(0, len(rest), step)][: count - 1]
-    return (cheapest, *spread)
 
 
 # -------------------------------------------------------------------- structures
@@ -745,11 +726,6 @@ def _styles(palette: Brand) -> dict[str, TextStyle]:
             max_chars_per_line=26,
         ),
     }
-
-
-def _number(price: str) -> float:
-    digits = "".join(c for c in price if c.isdigit())
-    return float(digits) if digits else 1e9
 
 
 def _spaced(phone: str) -> str:

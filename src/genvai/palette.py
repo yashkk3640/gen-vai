@@ -12,7 +12,7 @@ yields the same palette and a reel re-renders identically tomorrow.
 import numpy as np
 from numpy.typing import NDArray
 
-from genvai.timeline import Frozen
+from genvai.timeline import Frozen, Rect
 
 Colour = tuple[int, int, int]
 
@@ -26,6 +26,14 @@ MIN_SATURATION = 0.18
 """Below this a colour is effectively grey, and a grey accent is not an accent."""
 
 DEEP_LUMA = 52.0
+
+INK_SATURATION = 0.35
+INK_LUMA = 200.0
+"""A pixel inside a word box counts as ink when it is this coloured and this dark -
+which leaves out the paper between the letters."""
+
+MIN_INK = 400
+"""Fewer coloured ink pixels than this and the type is black or absent."""
 """Brightness the scrim colour is scaled to.
 
 Dark enough that white text sits on it comfortably, light enough that the hue still
@@ -73,6 +81,46 @@ def brand(image: NDArray[np.uint8]) -> Brand:
     # darkening a colour that was already dark gives near-black, which is a scrim that
     # could have come from any brand at all.
     return Brand(deep=_at_luma(deep, DEEP_LUMA), accent=accent, light=_lighten(light, 0.55))
+
+
+def type_palette(image: NDArray[np.uint8], text: tuple[Rect, ...]) -> Brand:
+    """The colours a poster's type is set in - which is its brand, stated.
+
+    `brand` reads the whole picture, and on a salon poster the photographs win: hair and
+    skin put brown and orange ahead of the magenta every heading is set in. Sampling only
+    the ink inside the words OCR found gives the designed colours - measured on the
+    Navratri posters as maroon and magenta, or magenta and deep purple.
+
+    Falls back to `brand` when there is too little coloured ink to go on.
+    """
+    whole = brand(image)
+    if image.ndim != 3 or not text:
+        return whole
+    height, width = image.shape[:2]
+    inks: list[NDArray[np.float64]] = []
+    for x, y, w, h in text:
+        patch = image[
+            int(y * height) : int((y + h) * height), int(x * width) : int((x + w) * width), :3
+        ]
+        pixels = patch.reshape(-1, 3).astype(np.float64)
+        if not pixels.size:
+            continue
+        high, low = pixels.max(axis=1), pixels.min(axis=1)
+        saturation = (high - low) / np.maximum(high, 1.0)
+        luma = pixels @ np.array([0.299, 0.587, 0.114])
+        inks.append(pixels[(saturation > INK_SATURATION) & (luma < INK_LUMA)])
+    ink = np.concatenate(inks) if inks else np.zeros((0, 3))
+    if len(ink) < MIN_INK:
+        return whole
+
+    colours = dominant(ink.astype(np.uint8)[None, :, :], 5)
+    darks = [c for c in colours if _luma(c) < 75] or colours
+    mids = [c for c in colours if 55 <= _luma(c) <= 130] or colours
+    return Brand(
+        deep=_at_luma(darks[0], DEEP_LUMA),
+        accent=max(mids, key=_saturation),
+        light=whole.light,
+    )
 
 
 def dominant(image: NDArray[np.uint8], count: int = CLUSTERS) -> list[Colour]:
