@@ -282,3 +282,52 @@ def test_a_label_ending_in_a_colon_keeps_its_small_print_apart() -> None:
         _box("350", 594, 655, w=60, h=30),
     ]
     assert _offers(boxes)[0][:2] == ("Cream", "₹350")
+
+
+# ------------------------------------------------------------ sections and headings
+
+
+def _wax_section() -> list[Box]:
+    """WAX over two variants, each with italic small print, as the skin posters set it."""
+    return [
+        _box(". WAX", 197, 539, w=95, h=31),
+        _box("HAIRSTYLE", 690, 547, w=121, h=24),  # the other column, level with it
+        _box("· Sugar :-", 218, 578, w=98, h=32),
+        _box("250", 574, 597, w=75, h=32),
+        _box("Fullhand,half leg,underarms", 239, 609, w=233, h=23),
+        _box("Cream :-", 224, 647, w=99, h=27),
+        _box("350", 573, 656, w=76, h=32),
+        _box("Full hand,halfleg,underarms", 239, 675, w=233, h=26),
+        _box("CLEAN UP", 218, 734, w=145, h=30),
+        _box("250", 574, 736, w=75, h=32),
+    ]
+
+
+def test_items_under_a_heading_take_its_name() -> None:
+    """ "Cream" alone means nothing on screen; "WAX · Cream" does."""
+    services = [s for s, _, _ in _offers(_wax_section())]
+    assert services == ["WAX · Sugar", "WAX · Cream", "CLEAN UP"]
+
+
+def test_the_next_service_in_capitals_ends_the_section() -> None:
+    assert ("CLEAN UP", "₹250", "") in _offers(_wax_section())
+
+
+def test_small_print_under_an_item_is_its_note() -> None:
+    notes = {s: n for s, _, n in _offers(_wax_section())}
+    assert notes["WAX · Sugar"] == "Full hand, half leg, underarms"
+    assert notes["WAX · Cream"] == "Full hand, half leg, underarms"
+
+
+def test_an_item_that_already_names_its_heading_is_left_alone() -> None:
+    boxes = [
+        _box("FACIAL", 203, 1094, w=117, h=30),
+        _box("· Fruit Facial", 225, 1138, w=125, h=24),
+        _box("500", 573, 1131, w=73, h=29),
+    ]
+    assert _offers(boxes)[0][0] == "Fruit Facial"
+
+
+def test_a_bulleted_line_is_never_a_wrapped_label() -> None:
+    boxes = [_box("WAX", 232, 589, w=90, h=31), _box("· Sugar :-", 246, 632, w=95, h=30)]
+    assert len(join_wrapped(boxes)) == 2

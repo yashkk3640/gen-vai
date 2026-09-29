@@ -265,3 +265,24 @@ def test_a_label_that_is_only_an_aside_is_kept() -> None:
 
 def test_a_middle_dot_inside_a_label_stays() -> None:
     assert Offer(service="WAX \u00b7 Sugar", price="250").tidy().service == "WAX \u00b7 Sugar"
+
+
+def test_a_number_run_into_a_word_is_spaced() -> None:
+    assert Offer(service="1FINGER ART", price="20").tidy().service == "1 FINGER ART"
+    assert Offer(service="D-TEN", price="200").tidy().service == "D-TEN"
+
+
+def test_words_run_together_in_small_print_are_split() -> None:
+    tidied = Offer(service="WAX", price="250", note="Fullhand,halfleg,underarms").tidy()
+    assert tidied.note == "Full hand, half leg, underarms"
+
+
+def test_a_clients_note_is_attached_by_part_of_the_service_name() -> None:
+    brief = Brief(
+        offers=(
+            Offer(service="DOTING ART", price="₹30"),
+            Offer(service="1 FINGER ART", price="₹20"),
+            Offer(service="TOE CAT EYE", price="₹500", note="Original Nail"),
+        )
+    ).with_notes({"art": "per finger"})
+    assert [o.note for o in brief.offers] == ["per finger", "per finger", "Original Nail"]

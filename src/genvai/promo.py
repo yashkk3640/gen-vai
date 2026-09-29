@@ -31,6 +31,46 @@ _ASIDE = re.compile(r"\s*\(([^()]*)\)?\s*$")
 """A trailing parenthetical - 'EYEBROW (Uparlips Free)' - which is small print, not name."""
 
 
+_WORDS = frozenset(
+    {
+        "full",
+        "half",
+        "hand",
+        "hands",
+        "leg",
+        "legs",
+        "arm",
+        "arms",
+        "face",
+        "upper",
+        "lip",
+        "lips",
+        "nail",
+        "nails",
+        "toe",
+        "toes",
+        "finger",
+        "eye",
+        "brow",
+        "neck",
+        "back",
+    }
+)
+"""Words OCR glues together in a poster's italic small print - "Fullhand", "halfleg".
+"under" is left out on purpose: "underarms" is one word."""
+
+
+def _unglued(word: str) -> str:
+    """Split a word OCR ran together, only when it is exactly two known words."""
+    core = word.rstrip(",.")
+    tail = word[len(core) :]
+    lowered = core.lower()
+    for cut in range(3, len(core) - 2):
+        if lowered[:cut] in _WORDS and lowered[cut:] in _WORDS:
+            return f"{core[:cut]} {core[cut:]}{tail}"
+    return word
+
+
 class Offer(Frozen):
     """One line of a price list."""
 
@@ -53,8 +93,13 @@ class Offer(Frozen):
         Stray bullets come off the ends, and a trailing parenthetical moves to the note
         where there is not one already - it is the poster's small print.
         """
-        service = " ".join(self.service.split()).strip(_EDGE)
-        note = " ".join(self.note.split()).strip(_EDGE)
+        # "1FINGER ART" - OCR drops the space between a number and the word after it.
+        service = re.sub(r"(\d)([A-Za-z]{2,})", r"\1 \2", " ".join(self.service.split()))
+        service = service.strip(_EDGE)
+        # OCR drops the space after a comma: "Full hand,half leg".
+        note = " ".join(_unglued(w) for w in re.sub(r",(?=\S)", ", ", self.note).split()).strip(
+            _EDGE
+        )
         aside = _ASIDE.search(service)
         if aside and service[: aside.start()].strip(_EDGE):
             note = note or aside.group(1).strip(_EDGE)
@@ -113,6 +158,24 @@ class Brief(Frozen):
             phone=self.phone or other.phone,
             offers=(*self.offers, *other.offers),
         ).cleaned()
+
+    def with_notes(self, notes: dict[str, str]) -> "Brief":
+        """Attach what the client told us and the poster does not say.
+
+        Keys match any service containing them, ignoring case: {"ART": "per finger"}
+        notes every nail-art add-on. A note given here replaces one read off the poster -
+        the client knows their own prices better than OCR does.
+        """
+        if not notes:
+            return self
+        updated = []
+        for offer in self.offers:
+            match = next(
+                (note for key, note in notes.items() if key.casefold() in offer.service.casefold()),
+                None,
+            )
+            updated.append(offer.model_copy(update={"note": match}) if match else offer)
+        return self.model_copy(update={"offers": tuple(updated)})
 
     @property
     def is_usable(self) -> bool:

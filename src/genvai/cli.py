@@ -460,6 +460,9 @@ def story(
     ),
     seed: int = typer.Option(0, "--seed", help="0 picks a random seed and records it."),
     no_llm: bool = typer.Option(False, "--no-llm", help="Use the arc's own copy lines."),
+    notes: list[str] = typer.Option(
+        None, "--note", help="SERVICE=note, e.g. 'ART=per finger'. Repeat for more."
+    ),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation."),
 ) -> None:
     """Design the reel before rendering it: a storyboard, and a storybook page to review.
@@ -488,7 +491,7 @@ def story(
             brief = brief.merge(read_brief(list(found)) if found else Brief())
     brief = brief.model_copy(
         update={"occasion": occasion or brief.occasion, "business": business or brief.business}
-    )
+    ).with_notes(_parse_notes(notes or []))
     if not brief.is_usable:
         console.print("[red]No prices found on that artwork.[/red]")
         raise typer.Exit(code=1)
@@ -858,6 +861,17 @@ def _promo_music(
     return approve_music(
         project, store, provider, detector, choice.strip(), confirmed=True, gain_db=SOLE_TRACK_DB
     )
+
+
+def _parse_notes(pairs: list[str]) -> dict[str, str]:
+    parsed: dict[str, str] = {}
+    for pair in pairs:
+        key, _, note = pair.partition("=")
+        if not key.strip() or not note.strip():
+            console.print(f"[red]--note needs SERVICE=note, got {pair!r}[/red]")
+            raise typer.Exit(code=1)
+        parsed[key.strip()] = note.strip()
+    return parsed
 
 
 def _report_legibility(checks: dict[str, tuple[tuple[str, str, float, str], ...]]) -> None:

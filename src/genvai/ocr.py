@@ -42,6 +42,9 @@ photograph between the label and the pill; the Navratri nail poster measures 4.8
 HEADER_GAP = 1.2
 """How far above a price a column header may sit, in price heights."""
 
+BULLETS = "·•.~-*"
+"""Marks that open a list item."""
+
 PRICE = re.compile(r"^[^\d]{0,4}(\d{2,5})(?:\.00?)?[^\d]{0,3}$")
 """A price: two to five digits with at most a little decoration. Bounded at five so a
 ten-digit phone number is never mistaken for one."""
@@ -205,7 +208,9 @@ def _is_continuation(first: Box, second: Box) -> bool:
     Aligned on the left edge, as a list is set, or on the centre, as a grid of options is.
     """
     # "Cream :-" introduces its small print; a label ending in a colon has not wrapped.
-    if first.text.rstrip().endswith((":", ":-")):
+    # And "· Sugar" under "WAX" is a list item: a line set with a bullet starts a new
+    # entry. Joining them made "WAX · Sugar" by accident and left "Cream" bare.
+    if first.text.rstrip().endswith((":", ":-")) or second.text.lstrip()[:1] in BULLETS:
         return False
     gap = second.y - (first.y + first.height)
     reach = first.height * 0.9
@@ -248,6 +253,7 @@ def pair_offers(boxes: list[Box]) -> list[Offer]:
     """
     prices = [(b, _amount(b)) for b in boxes]
     prices = [(b, amount) for b, amount in prices if amount]
+    sections = _sections(boxes)
 
     offers: list[Offer] = []
     for box, amount in prices:
@@ -256,12 +262,74 @@ def pair_offers(boxes: list[Box]) -> list[Offer]:
             continue
         offers.append(
             Offer(
-                service=label.cleaned,
+                service=_within(label, sections.get(id(label))),
                 price=f"₹{amount}",
                 note=_header_above(box, label, boxes) or _note_below(label, boxes),
             )
         )
     return offers
+
+
+def _sections(boxes: list[Box]) -> dict[int, Box]:
+    """Which section heading each list item sits under.
+
+    A price list groups variants under a heading that has no price of its own - "WAX",
+    then "Sugar" and "Cream" with theirs. On their own "Sugar" and "Cream" mean nothing;
+    a viewer needs "WAX · Cream". A heading is set in capitals with no price on its row;
+    its items follow below it in the same column, in ordinary case, and the section ends
+    at the next line in capitals - the next service - or at a gap.
+    """
+    priced = [b for b in boxes if _amount(b)]
+    labels = sorted((b for b in boxes if _is_label(b)), key=lambda b: b.y)
+    owner: dict[int, Box] = {}
+    for index, heading in enumerate(labels):
+        if not _leads_in_capitals(heading) or _priced_row(heading, priced):
+            continue
+        bottom = heading.y + heading.height
+        for item in labels[index + 1 :]:
+            # Another column - the "other services" list beside the prices - is skipped,
+            # not treated as the end of this section.
+            if abs(item.x - heading.x) > heading.height * 2:
+                continue
+            if item.y - bottom > heading.height * 2.5 or _leads_in_capitals(item):
+                break
+            bottom = item.y + item.height
+            if _priced_row(item, priced) or _introduces(item):
+                owner[id(item)] = heading
+    return owner
+
+
+def _priced_row(label: Box, priced: list[Box]) -> bool:
+    return any(_same_row(label, p) and p.x > label.right for p in priced)
+
+
+def _introduces(label: Box) -> bool:
+    """ "Cream :-" - a label that introduces its own small print."""
+    return label.text.rstrip().endswith((":", ":-"))
+
+
+def _leads_in_capitals(label: Box) -> bool:
+    """Whether a label's first word is in capitals - a service or a heading, where an
+    item under a heading is set in ordinary case. The first word only: "EYEBROW" joined
+    to its "(Uparlips Free)" is still a service."""
+    words = label.cleaned.strip(BULLETS + " :").split()
+    return bool(words) and _capitals(words[0])
+
+
+def _within(label: Box, heading: Box | None) -> str:
+    """A list item's name, with its section's in front unless it already says it."""
+    name = label.cleaned.strip(BULLETS + " :")
+    if heading is None:
+        return name
+    section = heading.cleaned.strip(BULLETS + " :")
+    if section.casefold() in name.casefold().replace(" ", ""):
+        return name
+    return f"{section} · {name}"
+
+
+def _capitals(text: str) -> bool:
+    letters = [c for c in text if c.isalpha()]
+    return len(letters) >= 2 and all(c.isupper() for c in letters)
 
 
 def find_phone(boxes: list[Box]) -> str:
@@ -307,11 +375,21 @@ def _label_left_of(price: Box, boxes: list[Box]) -> Box | None:
         and _same_row(b, price)
         and _is_label(b)
     ]
+    # A label that introduces its small print can sit just above the price's row, with
+    # the price set between it and the small print: "Sugar :-", 250, "full hand...".
+    candidates += [
+        b
+        for b in boxes
+        if b not in candidates
+        and _introduces(b)
+        and b.right <= price.x + price.width * 0.4
+        and 0 <= price.middle - b.middle <= price.height * 1.2
+    ]
     if not candidates:
         return None
     # "Cream :-" over "full hand, half leg" - the colon names which line is the service
     # when italic small print comes back as tall as its label.
-    introducing = [b for b in candidates if b.text.rstrip().endswith((":", ":-"))]
+    introducing = [b for b in candidates if _introduces(b)]
     candidates = introducing or candidates
     tallest = max(b.height for b in candidates)
     return max((b for b in candidates if b.height >= tallest * 0.88), key=lambda b: b.right)
@@ -389,9 +467,13 @@ def _note_below(label: Box, boxes: list[Box]) -> str:
         # Roughly the same left edge. Small print sits under its service; a centred
         # section heading further along the row is not small print at all.
         and abs(b.x - label.x) < label.width * 0.55
-        and b.height < label.height * 0.95
+        # Smaller than the label - except under "Cream :-", whose italic small print
+        # measures as tall as the label it belongs to.
+        and b.height < label.height * (1.25 if _introduces(label) else 0.95)
         and not _amount(b)
-        and not _has_own_price(b, priced, labels)
+        # "Sugar :-" owns the price set level with its small print, so that small print
+        # is still its note.
+        and (_introduces(label) or not _has_own_price(b, priced, labels))
         and not _looks_like_a_heading(b)
     ]
     if not below:

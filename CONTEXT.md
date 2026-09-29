@@ -20,7 +20,7 @@ what has already been tried and rejected.
 | `genvai create` | a text description, no footage | works |
 
 Plus `edit` (change it in plain English), `restore`, `music`, `render`, `media`, `list`,
-`doctor`. Ten milestones M0–M9 complete. **667 tests passing**, ruff clean.
+`doctor`. Ten milestones M0–M9 complete. **675 tests passing**, ruff clean.
 
 Everything runs locally. Nothing is uploaded. The only network call is a music download,
 and that is confirmation-gated.
