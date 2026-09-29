@@ -20,7 +20,7 @@ what has already been tried and rejected.
 | `genvai create` | a text description, no footage | works |
 
 Plus `edit` (change it in plain English), `restore`, `music`, `render`, `media`, `list`,
-`doctor`. Nine milestones M0–M8 complete. **601 tests passing**, ruff clean.
+`doctor`. Ten milestones M0–M9 complete. **643 tests passing**, ruff clean.
 
 Everything runs locally. Nothing is uploaded. The only network call is a music download,
 and that is confirmation-gated.
@@ -194,6 +194,17 @@ Three things, **all fixed on 2026-09-29**:
    needs to supply a track, or add the trending sound in the app.
 
 `beauty parlor/navratri offer/` holds the next job: two Navratri posters and a logo.
+Its `reel/` has six cuts: four from `promo`, and two from the storyboard layer (M9) -
+`navratri-beauty-STORY-glow-up` and `navratri-nails-STORY-countdown`, the better ones.
+
+### M9: the storyboard layer
+
+`genvai story` reads the poster, finds its pictures (`cast.py`), takes the brand colours
+from the type (`palette.type_palette`), drafts a storyboard from an arc (`stories.py`)
+and writes `story/storybook.html`. `genvai shoot` draws it (`adapters/compositor.py`).
+Measured: two of three model-written CTAs invented scarcity; the filter in
+`pipeline/story.py` catches both. Whole-image palettes put the photographs' browns ahead
+of the magenta headings; reading ink inside OCR boxes fixed it.
 
 ---
 

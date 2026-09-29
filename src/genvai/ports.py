@@ -9,7 +9,7 @@ should be readable in one sitting. See 'Ports and adapters' in docs/decisions.md
 """
 
 from pathlib import Path
-from typing import Literal, Protocol, TypeVar, runtime_checkable
+from typing import Any, Literal, Protocol, TypeVar, runtime_checkable
 
 import numpy as np
 from numpy.typing import NDArray
@@ -17,6 +17,7 @@ from pydantic import BaseModel
 
 from genvai.media import Face, MediaItem, MediaLibrary
 from genvai.promo import Brief
+from genvai.storyboard import Shot, Storyboard
 from genvai.timeline import (
     Asset,
     AssetProvenance,
@@ -175,6 +176,36 @@ class FaceDetector(Protocol):
     def detect(self, image: NDArray[np.uint8]) -> tuple[Face, ...]:
         """Faces in an RGB array, most confident first. Empty rather than raising."""
         ...
+
+
+@runtime_checkable
+class ShotRenderer(Protocol):
+    """Storyboard shots to video, drawn frame by frame.
+
+    Separate from `RendererPort`, which describes scenes as ffmpeg filtergraphs over
+    footage. A storyboard shot is layers, particles and animated type - drawing.
+    """
+
+    @property
+    def canvas(self) -> tuple[int, int]: ...
+
+    def stage(
+        self, board: Storyboard, shot: Shot, plates: tuple[Any, ...], posters: tuple[Any, ...]
+    ) -> Any:
+        """Prepare a shot once: backgrounds, card, text, particles."""
+        ...
+
+    def frame(self, stage: Any, t: float, *, cut_in: str, cut_out: str | None) -> Any:
+        """One frame of a prepared shot, as a PIL image."""
+        ...
+
+    def render_shot(
+        self, stage: Any, out: Path, *, frames: int, cut_in: str, cut_out: str | None
+    ) -> Path: ...
+
+    def join(self, segments: tuple[Path, ...], out: Path) -> Path: ...
+
+    def with_music(self, video: Path, track: Path, out: Path, *, seconds: float) -> Path: ...
 
 
 @runtime_checkable

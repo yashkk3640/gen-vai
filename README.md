@@ -37,6 +37,9 @@ genvai create "why compound interest matters" -d 20   # no footage needed
 
 genvai promo gk offer.png --occasion "Diwali offer"   # a reel from a price list
 genvai promo gk offer.png --style countdown --music song.mp3
+
+genvai story gk offer.png --occasion "Navratri offer" --arc glow-up   # design it first
+genvai shoot gk --music song.mp3                                      # then render it
 ```
 
 `promo` has five shapes - `classic`, `question`, `from`, `menu-first`, `countdown` -
@@ -55,6 +58,8 @@ picked by seed unless you name one, so two reels for one client do not come out 
 | `music` | Suggest a track, approve one, align cuts to its beat | yes |
 | `create` | No footage? Make one from a description alone | yes |
 | `promo` | A reel from offer artwork — reads the prices off it | yes |
+| `story` | Design a promo as a short film: storyboard + storybook page to review | yes |
+| `shoot` | Render the storyboard — layered, animated, cinematic | yes |
 
 A project is a plain folder under `projects/`. Open it and you can see every asset, every
 version of the edit, and every render. Copy it to another machine and it still works.
@@ -77,7 +82,7 @@ Fuller list in [TODO.md](TODO.md).
 
 ## Status
 
-**All nine milestones are done** — import, select, reframe, beat-align, render,
+**All ten milestones are done** — import, select, reframe, beat-align, render,
 edit, undo, and idea mode. What is left is refinement; see [TODO.md](TODO.md).
 
 ## Docs

@@ -77,3 +77,36 @@ there is no cache to invalidate.
 Immutability by construction, validation at the boundary, and JSON Schema export for
 free — which is exactly what constrained LLM decoding needs.
 **Rejected:** dataclasses (no validation), dicts (no contract).
+
+### A storyboard before the render (M9)
+
+A promo reel is designed as a short film first: `story/vN.json` holds a logline, an arc
+and one entry per shot - picture, framing, angle, camera move, captions and how each
+arrives, cut, effects, length in beats. It is reviewed as a storybook page, then drawn.
+For promos it is the source of truth; the timeline is not involved.
+**Rejected:** going straight from the brief to a timeline - nobody ever decided what the
+reel was about, and every reel came out the same shape.
+
+### Templates write the structure, the model writes three lines
+
+Arcs (glow-up, countdown, treat, reveal) carry the craft - where the hook lands, when the
+price appears, which cuts sit where. The 3B model writes only a hook, a promise and a
+call to action, and each is filtered: no digits, no repeating the occasion, no claims
+the poster does not make. It wrote "BOOK NOW BEFORE SOLD OUT" for a salon with no limit.
+**Rejected:** the model drafting whole storyboards - small models drift on multi-field
+schemas, measured in M3.
+
+### Frames drawn in Python, not filtergraphs
+
+A storyboard shot is layers - a card over a blurred copy of itself, particles in front,
+type popping on the beat. `adapters/compositor.py` prepares each shot once and draws it
+frame by frame with Pillow and numpy, piping raw frames to x264. About 0.35 s a frame at
+1080x1920; shots are cached by content, so editing one shot redraws one shot.
+**Rejected:** extending the ffmpeg filtergraph renderer - correct for footage, unreadable
+for motion graphics.
+
+### Poster imagery only, depth from layers
+
+The client chose not to film and not to use generated images. Poster photos are small
+(a tile is ~135 px), so they are never shown full screen: a card at no more than 5x,
+over a blurred, brand-tinted copy of itself, moving against it for parallax, with grain.

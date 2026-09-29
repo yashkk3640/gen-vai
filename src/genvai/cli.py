@@ -19,6 +19,7 @@ from rich.table import Table
 from genvai import __version__
 from genvai.adapters.analyzer import FrameAnalyzer
 from genvai.adapters.beat import FFmpegBeatDetector
+from genvai.adapters.compositor import Compositor
 from genvai.adapters.ffmpeg import FFmpegRenderer, resolve_ffmpeg
 from genvai.adapters.fs_store import FilesystemStore
 from genvai.adapters.images import image_provider
@@ -28,7 +29,7 @@ from genvai.adapters.rapid_ocr import RapidOcrVision
 from genvai.adapters.yunet_faces import YunetFaces
 from genvai.config import Settings, load_settings
 from genvai.errors import GenvaiError, RenderError
-from genvai.ocr import read_brief, text_rects
+from genvai.ocr import Box, read_brief, text_rects
 from genvai.pipeline.edit import edit as run_edit
 from genvai.pipeline.ingest import ingest, summarise
 from genvai.pipeline.music import SOLE_TRACK_DB
@@ -44,7 +45,12 @@ from genvai.pipeline.render import plan_render
 from genvai.pipeline.render import render as render_timeline
 from genvai.pipeline.resolve import resolve_visuals
 from genvai.pipeline.select import make_reel
+from genvai.pipeline.story import draft as draft_story
+from genvai.pipeline.story import read_material
+from genvai.pipeline.story import shoot as shoot_story
+from genvai.pipeline.story import storybook as make_storybook
 from genvai.promo import Brief
+from genvai.stories import ARC_NAMES, arc_for
 from genvai.timeline import Canvas, Rect, Timeline
 
 app = typer.Typer(
@@ -441,6 +447,147 @@ def promo(
             "[dim]For reach, upload the silent cut and attach a trending sound in the app; "
             "the full cut is for places with no sound library.[/dim]"
         )
+
+
+@app.command()
+def story(
+    project: str = typer.Argument(..., help="Project id, or a new name."),
+    posters: list[Path] = typer.Argument(..., help="The offer artwork. PNG or JPEG."),
+    occasion: str = typer.Option("", "--occasion", help="'Navratri offer'."),
+    business: str = typer.Option("", "--business", help="Whose offer it is."),
+    arc: str = typer.Option(
+        None, "--arc", help=f"Story: {', '.join(ARC_NAMES)}. Default: picked by seed."
+    ),
+    seed: int = typer.Option(0, "--seed", help="0 picks a random seed and records it."),
+    no_llm: bool = typer.Option(False, "--no-llm", help="Use the arc's own copy lines."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation."),
+) -> None:
+    """Design the reel before rendering it: a storyboard, and a storybook page to review.
+
+    Reads the prices off the artwork, finds its pictures and colours, and lays out a short
+    film from a story arc - every shot's framing, camera move, text, cut and length in
+    beats. Nothing is rendered but one frame per shot. Render it with: genvai shoot
+    """
+    settings = load_settings()
+    store = FilesystemStore(settings.projects_dir)
+    if arc is not None and arc not in ARC_NAMES:
+        console.print(f"[red]No arc '{arc}'.[/red] Choose from: {', '.join(ARC_NAMES)}")
+        raise typer.Exit(code=1)
+    reader = RapidOcrVision()
+    if not reader.is_available():
+        console.print("[red]OCR is not installed.[/red] Install it with: uv sync --extra ocr")
+        raise typer.Exit(code=1)
+    created = store.create(occasion or f"story from {posters[0].stem}", project)
+
+    brief = Brief(occasion=occasion, business=business)
+    boxes: list[tuple[Box, ...]] = []
+    with console.status("reading the artwork"):
+        for poster in posters:
+            found = tuple(reader.boxes(poster))
+            boxes.append(found)
+            brief = brief.merge(read_brief(list(found)) if found else Brief())
+    brief = brief.model_copy(
+        update={"occasion": occasion or brief.occasion, "business": business or brief.business}
+    )
+    if not brief.is_usable:
+        console.print("[red]No prices found on that artwork.[/red]")
+        raise typer.Exit(code=1)
+
+    table = Table(show_header=True, header_style="bold", title="what was read")
+    table.add_column("Service", overflow="fold")
+    table.add_column("Price", justify="right")
+    table.add_column("Note", overflow="fold")
+    for offer in brief.offers:
+        table.add_row(offer.service, offer.price, offer.note)
+    console.print(table)
+    console.print("[yellow]Check every price against the poster before this goes out.[/yellow]")
+    if not yes and not typer.confirm("Draft a storyboard from this?", default=True):
+        return
+
+    seed = seed or _random_seed()
+    chosen = arc_for(arc, seed)
+    llm: OllamaLLM | None = None if no_llm else OllamaLLM(settings.llm)
+    if llm is not None and not llm.is_available():
+        llm = None
+    with console.status("finding the pictures and drafting the story"):
+        material = read_material(created.id, store, tuple(posters), tuple(boxes), _faces(settings))
+        board = draft_story(
+            created.id,
+            store,
+            material,
+            brief,
+            arc=chosen,
+            seed=seed,
+            llm=llm,
+            on_note=lambda note: console.print(f"[yellow]{note}[/yellow]"),
+        )
+    with console.status("drawing a key frame per shot"):
+        book = make_storybook(
+            created.id, store, Compositor(resolve_ffmpeg(), width=720, height=1280)
+        )
+
+    shots = Table(show_header=True, header_style="bold", title=board.title)
+    shots.add_column("#")
+    shots.add_column("Role")
+    shots.add_column("Beats", justify="right")
+    shots.add_column("Shot", overflow="fold")
+    shots.add_column("Text", overflow="fold")
+    for shot in board.shots:
+        shots.add_row(
+            shot.id,
+            shot.role,
+            f"{shot.beats:g}",
+            f"{shot.framing} {shot.layout}, {shot.move.replace('_', ' ')}, {shot.cut} in",
+            " / ".join(c.text.replace(chr(10), " ") for c in shot.captions),
+        )
+    console.print(shots)
+    console.print(
+        f"[bold]{created.id}[/bold] storyboard v{board.version}  [cyan]{board.arc}[/cyan]  "
+        f"{len(board.shots)} shots  {board.duration:.1f}s at {board.bpm:.0f} bpm"
+    )
+    console.print(f"[dim]{board.logline}[/dim]")
+    console.print(f"  storybook  {book}")
+    console.print(f"[dim]Render it with: genvai shoot {created.id}[/dim]")
+
+
+@app.command()
+def shoot(
+    project: str = typer.Argument(..., help="Project id."),
+    track: Path = typer.Option(None, "--music", help="An audio file to put under it."),
+    preview: bool = typer.Option(False, "--preview", help="Half size, for a quick look."),
+) -> None:
+    """Render a project's storyboard into the reel."""
+    settings = load_settings()
+    store = FilesystemStore(settings.projects_dir)
+    if track is not None and not track.is_file():
+        console.print(f"[red]No audio file at {track}[/red]")
+        raise typer.Exit(code=1)
+    size = (540, 960) if preview else (1080, 1920)
+    compositor = Compositor(resolve_ffmpeg(), width=size[0], height=size[1])
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TextColumn("{task.completed}/{task.total}"),
+        console=console,
+    ) as bar:
+        task = bar.add_task("shooting", total=None)
+
+        def tick(shot_id: str, index: int, total: int) -> None:
+            bar.update(task, total=total, completed=index - 1, description=f"shooting {shot_id}")
+
+        try:
+            outputs = shoot_story(project, store, compositor, track=track, on_shot=tick)
+        except GenvaiError as exc:
+            console.print(f"[red]{exc}[/red]")
+            if isinstance(exc, RenderError) and exc.stderr:
+                console.print(f"[dim]{exc.stderr}[/dim]")
+            raise typer.Exit(code=1) from exc
+        bar.update(task, completed=bar.tasks[0].total or 0)
+
+    for variant, path in outputs.items():
+        console.print(f"  [green]{variant}[/green]  {path}")
 
 
 @app.command()

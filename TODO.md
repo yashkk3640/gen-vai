@@ -63,6 +63,21 @@ Things that work as designed but that you should know before trusting the output
       their headers, labels whose price sits by their second line. 14/14, 10/10,
       11/11, 10/10 on the four client posters
 
+## M9 - storyboard layer (done 2026-09-29)
+
+- [x] Cast: each picture on a poster as an object, named by the label beside it
+- [x] Storyboard schema, four story arcs, model-written copy with a claims filter
+- [x] Frame compositor: cards over blurred backdrops, parallax, petals, bokeh, light
+      leaks, grain, animated type, whip / flash / zoom / fade cuts
+- [x] Storybook page; `genvai story` and `genvai shoot`; shots cached by content
+
+## Storyboard - known gaps
+
+- [ ] 0.35 s a frame at full size - a 20 s reel takes about three minutes
+- [ ] Offers with no matching picture fall back to any person, sometimes a repeat
+- [ ] Shots cannot yet be edited in plain English; edit `story/vN.json` and re-shoot
+- [ ] Combining two posters in one storyboard is untested
+
 ## Worth doing next
 
 - [ ] Tune the thresholds against a **real** camera roll. Highest value of anything here
