@@ -5,7 +5,8 @@ survived and what shape the canvas is. Nothing here changes the edit - only how 
 shot is framed within it.
 
 Everything is measurement and arithmetic: ffmpeg decodes a few frames, numpy finds the
-detail, and the result is a crop rectangle on the scene. No model.
+detail, and the result is a crop rectangle on the scene. A face detector, when one is
+passed, pulls the crop of a still toward the person in it.
 """
 
 from collections.abc import Callable
@@ -13,6 +14,7 @@ from pathlib import Path
 
 from genvai.adapters.analyzer import sample_span
 from genvai.analysis import to_greyscale
+from genvai.ports import FaceDetector
 from genvai.reframe import crop_for, focus, needs_reframing, solve_path
 from genvai.timeline import AssetVisual, ClipVisual, Scene, Timeline
 
@@ -30,6 +32,7 @@ def reframe(
     ffmpeg: Path,
     *,
     aspects: dict[str, float] | None = None,
+    faces: FaceDetector | None = None,
 ) -> Timeline:
     """Give every shot a crop that keeps its subject in frame.
 
@@ -43,7 +46,7 @@ def reframe(
     return timeline.model_copy(
         update={
             "scenes": tuple(
-                _reframed(scene, timeline, resolve_asset, ffmpeg, target, aspects or {})
+                _reframed(scene, resolve_asset, ffmpeg, target, aspects or {}, faces)
                 for scene in timeline.scenes
             )
         }
@@ -52,11 +55,11 @@ def reframe(
 
 def _reframed(
     scene: Scene,
-    timeline: Timeline,
     resolve_asset: Callable[[str], Path],
     ffmpeg: Path,
     target: float,
     aspects: dict[str, float],
+    faces: FaceDetector | None,
 ) -> Scene:
     visual = scene.visual
     if not isinstance(visual, ClipVisual | AssetVisual) or visual.crop is not None:
@@ -72,15 +75,13 @@ def _reframed(
         return scene
 
     if isinstance(visual, AssetVisual):
-        frames = [to_greyscale(f) for f in sample_span(path, ffmpeg, start=0.0, end=0.1, count=1)]
+        frames = sample_span(path, ffmpeg, start=0.0, end=0.1, count=1)
         if not frames:
             return scene
+        found = faces.detect(frames[0]) if faces is not None and faces.is_available() else ()
+        centre = focus(to_greyscale(frames[0]), found)
         return scene.model_copy(
-            update={
-                "visual": visual.model_copy(
-                    update={"crop": crop_for(focus(frames[0]), source, target)}
-                )
-            }
+            update={"visual": visual.model_copy(update={"crop": crop_for(centre, source, target)})}
         )
 
     frames = [

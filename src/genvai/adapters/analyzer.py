@@ -1,9 +1,11 @@
 """MediaAnalyzer over ffmpeg frame extraction plus numpy arithmetic.
 
-No OpenCV, no model, no GPU. ffmpeg pulls a handful of frames per clip, Pillow decodes
+No model and no GPU for the measuring. ffmpeg pulls a handful of frames per clip, Pillow decodes
 them and `genvai.analysis` does the measuring. That is what makes analysing a hundred
 phone clips feasible on a laptop: the expensive part of camera-roll editing is the
 judgement, not the measurement.
+
+A face detector is optional and only fills `face_area`; everything else is arithmetic.
 
 Results are keyed by content hash upstream, so a file is analysed exactly once, ever.
 """
@@ -28,6 +30,7 @@ from genvai.analysis import (
     to_greyscale,
 )
 from genvai.media import ClipQuality, MediaItem
+from genvai.ports import FaceDetector
 
 SAMPLE_FPS = 4.0
 """Frames per second to measure.
@@ -51,8 +54,9 @@ class FrameAnalyzer:
 
     name = "frames"
 
-    def __init__(self, ffmpeg: Path) -> None:
+    def __init__(self, ffmpeg: Path, faces: FaceDetector | None = None) -> None:
         self._ffmpeg = ffmpeg
+        self._faces = faces if faces is not None and faces.is_available() else None
 
     def is_available(self) -> bool:
         return self._ffmpeg.exists()
@@ -77,6 +81,7 @@ class FrameAnalyzer:
             exposure=float(np.mean(light)),
             motion=float(np.mean(movement)) if movement else 0.0,
             shake=shake(movement),
+            face_area=self._face_area(frames[len(frames) // 2]),
             audio_peak_db=self._audio_peak(media) if item.kind == "video" else None,
         )
 
@@ -106,6 +111,12 @@ class FrameAnalyzer:
         """Group near-identical shots by their stored fingerprints."""
         hashes = {i.asset_id: i.fingerprint for i in items if i.fingerprint is not None}
         return group_duplicates(hashes)
+
+    def _face_area(self, frame: np.ndarray) -> float:
+        """The largest face in a representative frame, as a fraction of it."""
+        if self._faces is None:
+            return 0.0
+        return min(1.0, max((f.area for f in self._faces.detect(frame)), default=0.0))
 
     # ------------------------------------------------------------------ frames
 

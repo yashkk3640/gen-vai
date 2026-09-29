@@ -11,9 +11,11 @@ should be readable in one sitting. See 'Ports and adapters' in docs/decisions.md
 from pathlib import Path
 from typing import Literal, Protocol, TypeVar, runtime_checkable
 
+import numpy as np
+from numpy.typing import NDArray
 from pydantic import BaseModel
 
-from genvai.media import MediaItem, MediaLibrary
+from genvai.media import Face, MediaItem, MediaLibrary
 from genvai.promo import Brief
 from genvai.timeline import (
     Asset,
@@ -154,6 +156,24 @@ class MediaAnalyzer(Protocol):
 
         Only ids that belong to a group of two or more appear in the result.
         """
+        ...
+
+
+@runtime_checkable
+class FaceDetector(Protocol):
+    """Find faces in a picture.
+
+    Optional. Everything that uses it - reframing, backdrop choice, `face_area` - works
+    from detail saliency alone without one; faces are weighted on top when present.
+    """
+
+    @property
+    def name(self) -> str: ...
+
+    def is_available(self) -> bool: ...
+
+    def detect(self, image: NDArray[np.uint8]) -> tuple[Face, ...]:
+        """Faces in an RGB array, most confident first. Empty rather than raising."""
         ...
 
 

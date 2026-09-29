@@ -15,6 +15,7 @@ Pure numpy over an image array.
 import numpy as np
 from numpy.typing import NDArray
 
+from genvai.media import Face
 from genvai.timeline import Rect
 
 GRID = 7
@@ -28,9 +29,28 @@ PAPER_SATURATION = 0.16
 MIN_COLOUR = 14.0
 """Channel spread below which a region has nothing to look at, however dark it is."""
 
+FACE_WEIGHT = 1.5
+"""How much a whole face inside a window multiplies its score.
+
+Picture-likeness cannot tell a face from a flower, and a backdrop with a person in it
+holds a viewer where a flower does not - the client picked exactly those out of the
+hand-built reel. Enough to beat a busier patch of ornament, not enough to lift a face
+drawn in line art on bare paper over a real photograph.
+"""
+
+FACE_HEIGHT = 0.34
+"""Where a face sits in a window built around it, from the top.
+
+Above centre, because the centre of every promo beat is taken by the price.
+"""
+
 
 def photo_regions(
-    image: NDArray[np.uint8], *, count: int = 4, aspect: float | None = None
+    image: NDArray[np.uint8],
+    *,
+    count: int = 4,
+    aspect: float | None = None,
+    faces: tuple[Face, ...] = (),
 ) -> tuple[Rect, ...]:
     """The most picture-like rectangles in a layout, best first.
 
@@ -40,6 +60,9 @@ def photo_regions(
     `aspect` widens or narrows the window to the shape it will eventually be cropped to,
     which matters: a region that scores well as a square may be half type once it has
     been squeezed into 9:16.
+
+    `faces` adds a window placed around each one to the candidates, and weights any
+    window holding a whole face above one that does not.
     """
     if image.ndim != 3 or image.size == 0:
         return ()
@@ -53,19 +76,21 @@ def photo_regions(
     step_y = max(1, int(window_h / 2))
     step_x = max(1, int(window_w / 2))
 
+    origins = [
+        (left, top)
+        for top in range(0, max(1, height - int(window_h) + 1), step_y)
+        for left in range(0, max(1, width - int(window_w) + 1), step_x)
+    ]
+    origins += [_around(face, width, height, window_w, window_h) for face in faces]
+
     scored: list[tuple[float, Rect]] = []
-    for top in range(0, max(1, height - int(window_h) + 1), step_y):
-        for left in range(0, max(1, width - int(window_w) + 1), step_x):
-            patch = image[top : top + int(window_h), left : left + int(window_w), :3]
-            value = score(patch)
-            if value <= 0:
-                continue
-            scored.append(
-                (
-                    value,
-                    (left / width, top / height, window_w / width, window_h / height),
-                )
-            )
+    for left, top in origins:
+        patch = image[top : top + int(window_h), left : left + int(window_w), :3]
+        value = score(patch)
+        if value <= 0:
+            continue
+        rect = (left / width, top / height, window_w / width, window_h / height)
+        scored.append((value * (1.0 + FACE_WEIGHT * _faces_held(rect, faces)), rect))
 
     scored.sort(key=lambda pair: -pair[0])
     return tuple(_spread_out(scored, count))
@@ -98,6 +123,41 @@ def score(patch: NDArray[np.uint8]) -> float:
     return colour * (1.0 - paper) ** 2
 
 
+def _around(
+    face: Face, width: int, height: int, window_w: float, window_h: float
+) -> tuple[int, int]:
+    """The top-left of a window centred across a face and holding it above centre."""
+    cx, cy = face.centre
+    left = cx * width - window_w / 2
+    top = cy * height - window_h * FACE_HEIGHT
+    return (
+        int(min(max(0.0, left), width - window_w)),
+        int(min(max(0.0, top), height - window_h)),
+    )
+
+
+def _faces_held(rect: Rect, faces: tuple[Face, ...]) -> float:
+    """How much face a window holds, 0-1: each face counted by how much of it is inside.
+
+    A face cut in half by the window edge counts for half, which is generous - but a
+    crop through someone's face is caught later by the inset anyway.
+    """
+    held = 0.0
+    for face in faces:
+        if face.area <= 0:
+            continue
+        held += face.confidence * _shared(rect, face.rect) / face.area
+    return min(1.0, held)
+
+
+def _shared(a: Rect, b: Rect) -> float:
+    ax, ay, aw, ah = a
+    bx, by, bw, bh = b
+    wide = max(0.0, min(ax + aw, bx + bw) - max(ax, bx))
+    tall = max(0.0, min(ay + ah, by + bh) - max(ay, by))
+    return wide * tall
+
+
 def _spread_out(scored: list[tuple[float, Rect]], count: int) -> list[Rect]:
     """Keep the best, then only rects that do not overlap one already kept."""
     kept: list[Rect] = []
@@ -112,10 +172,6 @@ def _spread_out(scored: list[tuple[float, Rect]], count: int) -> list[Rect]:
 
 def _overlaps(a: Rect, b: Rect, *, allowed: float = 0.25) -> bool:
     """Whether two rects share more than a little of their area."""
-    ax, ay, aw, ah = a
-    bx, by, bw, bh = b
-    wide = max(0.0, min(ax + aw, bx + bw) - max(ax, bx))
-    tall = max(0.0, min(ay + ah, by + bh) - max(ay, by))
-    shared = wide * tall
-    smaller = min(aw * ah, bw * bh)
+    shared = _shared(a, b)
+    smaller = min(a[2] * a[3], b[2] * b[3])
     return smaller > 0 and shared / smaller > allowed

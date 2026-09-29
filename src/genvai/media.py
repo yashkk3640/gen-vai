@@ -14,9 +14,25 @@ from typing import Literal
 
 from pydantic import Field
 
-from genvai.timeline import Frozen, Seconds
+from genvai.timeline import Frozen, Rect, Seconds
 
 MEDIA_SCHEMA_VERSION = 1
+
+
+class Face(Frozen):
+    """A face found in a picture, in fractions of the frame."""
+
+    rect: Rect
+    confidence: float = Field(ge=0.0, le=1.0)
+
+    @property
+    def area(self) -> float:
+        return max(0.0, self.rect[2]) * max(0.0, self.rect[3])
+
+    @property
+    def centre(self) -> tuple[float, float]:
+        x, y, w, h = self.rect
+        return x + w / 2, y + h / 2
 
 
 class ClipQuality(Frozen):

@@ -64,6 +64,17 @@ class MusicSettings(BaseModel):
     )
 
 
+class FaceSettings(BaseModel):
+    model_path: Path = Path("assets/models/face_detection_yunet_2023mar.onnx")
+    min_confidence: float = Field(
+        default=0.82,
+        description=(
+            "Measured on real posters: photographed faces score 0.86-0.92, round nail-art "
+            "thumbnails 0.74-0.80. See adapters/yunet_faces.py."
+        ),
+    )
+
+
 class RenderSettings(BaseModel):
     video_codec: str = "libx264"
     audio_codec: str = "aac"
@@ -85,6 +96,7 @@ class Settings(BaseSettings):
     image: ImageSettings = ImageSettings()
     tts: TTSSettings = TTSSettings()
     music: MusicSettings = MusicSettings()
+    faces: FaceSettings = FaceSettings()
     render: RenderSettings = RenderSettings()
 
     projects_dir: Path = Path("projects")

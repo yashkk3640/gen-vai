@@ -20,6 +20,8 @@ projects/*/
 assets/music_cache/*
 !assets/music_cache/.gitkeep
 models/
+# Small detector models ship with the repo so a clone works offline.
+!assets/models/
 *.mp4
 *.mov
 *.wav

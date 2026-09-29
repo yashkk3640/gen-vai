@@ -7,8 +7,8 @@ and crops around that instead.
 Saliency rather than face detection, and the choice is not only about avoiding a
 dependency. A face detector answers one question well and everything else not at all -
 it has nothing to say about a plate of food, a dog, a building or a sunset, which is
-most of what a camera roll holds. Faces would be a genuine improvement *on top* of
-this, and are noted in the backlog.
+most of what a camera roll holds. Faces are weighted in *on top* of this when a
+detector is installed: see `focus`.
 
 Saliency here means local detail density. Spectral residual, the textbook choice, was
 tried first and measured: it located a centred subject well and then failed badly near
@@ -23,6 +23,7 @@ All of it is numpy over greyscale frames - no model, no GPU.
 import numpy as np
 from numpy.typing import NDArray
 
+from genvai.media import Face
 from genvai.timeline import Rect
 
 Frame = NDArray[np.float64]
@@ -52,6 +53,13 @@ DRIFT_THRESHOLD = 0.06
 
 Below this the crop is held still. A frame that creeps by two percent reads as a fault
 in the render rather than as camera work.
+"""
+
+FACE_PULL = 0.75
+"""How far the crop centre is drawn from the detail centroid toward the largest face.
+
+Not all the way. A face at the very edge of a group shot would otherwise drag the crop
+off everyone else; three quarters keeps the face in frame and some of its context.
 """
 
 SMOOTHING = 5
@@ -88,20 +96,26 @@ def saliency(frame: Frame) -> Frame:
     return _normalise(lit)
 
 
-def focus(frame: Frame) -> tuple[float, float]:
+def focus(frame: Frame, faces: tuple[Face, ...] = ()) -> tuple[float, float]:
     """The subject's centre, as fractions of width and height.
 
     A saliency-weighted centre of mass rather than the single brightest point: one
-    specular highlight should not drag the frame off the subject.
+    specular highlight should not drag the frame off the subject. When there are faces,
+    the centre is pulled most of the way toward the largest - detail density finds a
+    patterned shirt as readily as the person wearing it.
     """
     heat = saliency(frame)
     total = heat.sum()
     if total <= 0:
-        return 0.5, 0.5
+        x, y = 0.5, 0.5
+    else:
+        rows, columns = heat.shape
+        x = float((heat.sum(axis=0) @ (np.arange(columns) + 0.5)) / total / columns)
+        y = float((heat.sum(axis=1) @ (np.arange(rows) + 0.5)) / total / rows)
 
-    rows, columns = heat.shape
-    x = float((heat.sum(axis=0) @ (np.arange(columns) + 0.5)) / total / columns)
-    y = float((heat.sum(axis=1) @ (np.arange(rows) + 0.5)) / total / rows)
+    if faces:
+        fx, fy = max(faces, key=lambda f: f.area).centre
+        x, y = x + (fx - x) * FACE_PULL, y + (fy - y) * FACE_PULL
     return _clamp(x), _clamp(y)
 
 

@@ -24,7 +24,8 @@ from genvai.adapters.images import image_provider
 from genvai.adapters.music_local import LocalMusicProvider
 from genvai.adapters.ollama import OllamaLLM
 from genvai.adapters.rapid_ocr import RapidOcrVision
-from genvai.config import load_settings
+from genvai.adapters.yunet_faces import YunetFaces
+from genvai.config import Settings, load_settings
 from genvai.errors import GenvaiError, RenderError
 from genvai.pipeline.edit import edit as run_edit
 from genvai.pipeline.ingest import ingest, summarise
@@ -82,6 +83,13 @@ def doctor() -> None:
         detail = _cuda_detail() if (installed and module == "torch") else f"uv sync --extra {extra}"
         table.add_row(label, status, detail)
 
+    faces = _faces(settings)
+    table.add_row(
+        "faces (YuNet)",
+        "ok" if faces.is_available() else "missing",
+        str(settings.faces.model_path) if faces.is_available() else "uv sync --extra ocr",
+    )
+
     table.add_row("projects dir", "ok", str(settings.projects_dir.resolve()))
     console.print(table)
     console.print(
@@ -117,7 +125,12 @@ def add(
             bar.update(task, total=total, completed=index, description=f"analysing {name}")
 
         library = ingest(
-            tuple(files), project, FrameAnalyzer(ffmpeg), store, ffmpeg, on_progress=tick
+            tuple(files),
+            project,
+            FrameAnalyzer(ffmpeg, _faces(settings)),
+            store,
+            ffmpeg,
+            on_progress=tick,
         )
 
     console.print(f"[bold]{project}[/bold]  {summarise(library.items)}")
@@ -153,6 +166,7 @@ def reel(
             seed=seed or _random_seed(),
             llm=llm,
             ffmpeg=resolve_ffmpeg(),
+            faces=_faces(settings),
             on_note=lambda note: console.print(f"[yellow]{note}[/yellow]"),
         )
     except GenvaiError as exc:
@@ -363,6 +377,7 @@ def promo(
         store_asset=lambda image, provenance: store.store_asset(
             created.id, image, "image", provenance
         ),
+        faces=_faces(settings),
     )
     if duration > 0:
         timeline = _scaled_to(timeline, duration)
@@ -608,6 +623,10 @@ def _not_yet(command: str, milestone: str) -> None:
         "[dim]See TODO.md for what is built and what comes next.[/dim]"
     )
     raise typer.Exit(code=2)
+
+
+def _faces(settings: Settings) -> YunetFaces:
+    return YunetFaces(settings.faces.model_path, min_confidence=settings.faces.min_confidence)
 
 
 def _canvas_for(aspect: str) -> Canvas:

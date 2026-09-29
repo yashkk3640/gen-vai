@@ -22,7 +22,7 @@ from genvai.beats import snap
 from genvai.errors import GenvaiError
 from genvai.media import MediaItem, MediaLibrary
 from genvai.pipeline.reframe import reframe, source_aspects
-from genvai.ports import LLMPort, ProjectStore
+from genvai.ports import FaceDetector, LLMPort, ProjectStore
 from genvai.timeline import (
     Asset,
     AssetVisual,
@@ -56,6 +56,14 @@ handing it the best twenty.
 
 _WORD = re.compile(r"[a-z0-9]+")
 
+FACE_BONUS = 0.1
+"""Added for a shot with a clearly visible face. Faces hold attention, but this is a
+tie-breaker between usable shots, not a reason to keep a blurred one."""
+
+FACE_FULL = 0.04
+"""A face covering this fraction of the frame earns the whole bonus - a head and
+shoulders in a phone photo. Smaller faces earn proportionally less."""
+
 
 def item_score(item: MediaItem, *, intent: str = "") -> float:
     """How much this shot deserves a place, 0-1.
@@ -81,7 +89,8 @@ def item_score(item: MediaItem, *, intent: str = "") -> float:
 
     if not quality.usable:
         base *= 0.35
-    return min(1.0, base + _intent_bonus(item, intent))
+    faces = FACE_BONUS * min(1.0, quality.face_area / FACE_FULL)
+    return min(1.0, base + faces + _intent_bonus(item, intent))
 
 
 def contribution(item: MediaItem) -> float:
@@ -350,6 +359,7 @@ def make_reel(
     seed: int = 0,
     llm: LLMPort | None = None,
     ffmpeg: Path | None = None,
+    faces: FaceDetector | None = None,
     on_note: Callable[[str], None] | None = None,
 ) -> Timeline:
     """Library -> a saved, renderable timeline.
@@ -406,6 +416,7 @@ def make_reel(
             lambda asset_id: store.asset_path(project_id, asset_id),
             ffmpeg,
             aspects=source_aspects(timeline, library),
+            faces=faces,
         )
 
     versions = store.versions(project_id)

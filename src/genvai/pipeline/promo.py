@@ -19,6 +19,7 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFilter
 
 from genvai.palette import Brand, brand
+from genvai.ports import FaceDetector
 from genvai.promo import Brief, Offer
 from genvai.regions import photo_regions
 from genvai.timeline import (
@@ -43,6 +44,10 @@ FEATURED = 4
 Enough to make the reel worth watching, few enough that each price is on screen long
 enough to read. The rest are on the poster card.
 """
+
+REGIONS = 4
+"""Backdrops mined per poster. One more than a single structure needs, so structures
+that use more beats do not repeat a picture as soon."""
 
 OFFER_SECONDS = 2.5
 CARD_SECONDS = 2.9
@@ -76,6 +81,7 @@ def build(
     seed: int = 0,
     featured: int = FEATURED,
     store_asset: Callable[[Path, AssetProvenance], Asset],
+    faces: FaceDetector | None = None,
 ) -> Timeline:
     """Turn a confirmed brief and its artwork into a renderable timeline.
 
@@ -86,7 +92,7 @@ def build(
     work.mkdir(parents=True, exist_ok=True)
     palette = _palette_of(posters)
 
-    backdrops = _backdrops(posters, palette, frame, work)
+    backdrops = _backdrops(posters, palette, frame, work, faces)
     chosen = choose(brief.offers, featured)
 
     scenes: list[Scene] = []
@@ -203,18 +209,30 @@ def _palette_of(posters: tuple[Path, ...]) -> Brand:
         return brand(np.asarray(opened.convert("RGB")))
 
 
-def _backdrops(posters: tuple[Path, ...], palette: Brand, canvas: Canvas, work: Path) -> list[Path]:
+def _backdrops(
+    posters: tuple[Path, ...],
+    palette: Brand,
+    canvas: Canvas,
+    work: Path,
+    faces: FaceDetector | None = None,
+) -> list[Path]:
     """One scrimmed backdrop per picture-like region found across the artwork.
+
+    With a face detector, regions holding a face rank first - the backdrops the client
+    liked in the hand-built reel were the ones with a person in them.
 
     Always returns something. A poster that is nothing but type yields no regions, and a
     flat brand-coloured card is a better answer than a crash.
     """
+    detector = faces if faces is not None and faces.is_available() else None
     made: list[Path] = []
     for poster in posters:
         with Image.open(poster) as opened:
             picture = opened.convert("RGB")
             array = np.asarray(picture)
-        for index, rect in enumerate(photo_regions(array, count=3, aspect=canvas.aspect)):
+        found = detector.detect(array) if detector else ()
+        regions = photo_regions(array, count=REGIONS, aspect=canvas.aspect, faces=found)
+        for index, rect in enumerate(regions):
             out = work / f"bd-{poster.stem[:16]}-{index}.png"
             _scrimmed(picture, rect, palette, canvas).save(out)
             made.append(out)
