@@ -256,7 +256,8 @@ def test_a_list_holds_three_services_a_screen(poster: Path, keeper, tmp_path: Pa
 def test_without_an_occasion_no_deadline_is_invented(poster: Path, keeper, tmp_path: Path) -> None:
     brief = _brief().model_copy(update={"occasion": ""})
     timeline = build(brief, (poster,), tmp_path / "w", store_asset=keeper, style="from")
-    assert all("statement" not in {o.style_ref for o in s.overlays} for s in timeline.scenes)
+    shown = {o.content for s in timeline.scenes for o in s.overlays}
+    assert "book before it ends" not in shown
 
 
 def test_menu_first_opens_on_the_poster(poster: Path, keeper, tmp_path: Path) -> None:

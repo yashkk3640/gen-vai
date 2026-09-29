@@ -337,6 +337,8 @@ def _from(
             footer=brief.business if brief.occasion else "",
             note="from",
             picture="first",
+            # "FROM ₹1000" at headline size runs under the Reels buttons on the right.
+            headline_style="statement",
         ),
     )
 
