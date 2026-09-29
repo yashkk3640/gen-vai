@@ -205,3 +205,80 @@ def test_a_price_pill_spanning_a_wrapped_label_belongs_to_the_pair() -> None:
         _box("HAND", 188, 522, h=38, w=113),
     ]
     assert _services(boxes) == [("GEL POLISH HAND", "₹150")]
+
+
+# ---------------------------------------------------- layouts from the Navratri posters
+
+
+def _offers(boxes: list[Box]) -> list[tuple[str, str, str]]:
+    return [(o.service, o.price, o.note) for o in read_brief(boxes).offers]
+
+
+def test_a_centred_grid_label_over_its_pill() -> None:
+    """Add-ons: a centred two-line label, a photo, then the price well below."""
+    boxes = [
+        _box("PARFINGER", 204, 1068, w=91, h=20),
+        _box("ART", 231, 1089, w=35, h=22),
+        _box("?30", 215, 1226, w=57, h=30),
+        _box("MARBLE", 490, 1068, w=64, h=21),
+        _box("ART", 506, 1088, w=34, h=23),
+        _box("?40", 488, 1226, w=58, h=30),
+    ]
+    assert [(s, p) for s, p, _ in _offers(boxes)] == [
+        ("PARFINGER ART", "₹30"),
+        ("MARBLE ART", "₹40"),
+    ]
+
+
+def test_grid_lines_that_overlap_by_a_pixel_still_join() -> None:
+    boxes = [
+        _box("GLITER", 637, 1043, w=62, h=26),
+        _box("ART", 650, 1066, w=37, h=22),
+        _box("50", 639, 1216, w=47, h=35),
+    ]
+    assert _offers(boxes)[0][0] == "GLITER ART"
+
+
+def test_a_price_level_with_the_second_line_belongs_to_both() -> None:
+    """Read as "HAND 200" before: the pill lines up with the label's second line."""
+    boxes = [
+        _box("GEL POLISH", 208, 480, w=206, h=37),
+        _box("HAND", 204, 524, w=113, h=44),
+        _box("200", 546, 521, w=89, h=52),
+    ]
+    assert _offers(boxes)[0][:2] == ("GEL POLISH HAND", "₹200")
+
+
+def test_two_prices_on_a_row_take_their_column_headers() -> None:
+    boxes = [
+        _box("Original Nail", 529, 474, w=122, h=30),
+        _box("Temporary Extension", 748, 473, w=198, h=32),
+        _box("GEL POLISH", 208, 480, w=206, h=37),
+        _box("HAND", 204, 524, w=113, h=44),
+        _box("200", 546, 521, w=89, h=52),
+        _box("350", 797, 521, w=89, h=52),
+    ]
+    assert _offers(boxes) == [
+        ("GEL POLISH HAND", "₹200", "Original Nail"),
+        ("GEL POLISH HAND", "₹350", "Temporary Extension"),
+    ]
+
+
+def test_a_tagline_off_to_one_side_is_not_a_header() -> None:
+    boxes = [
+        _box("beautiful nails!", 506, 403, w=207, h=39),
+        _box("GEL POLISH", 189, 481, w=212, h=33),
+        _box("HAND", 188, 522, w=113, h=38),
+        _box("150", 454, 492, w=97, h=60),
+    ]
+    assert _offers(boxes)[0][2] == ""
+
+
+def test_a_label_ending_in_a_colon_keeps_its_small_print_apart() -> None:
+    """Italic small print can come back as tall as the label it belongs to."""
+    boxes = [
+        _box("Cream :-", 224, 647, w=99, h=27),
+        _box("Full hand,halfleg,underarms", 239, 675, w=233, h=26),
+        _box("350", 594, 655, w=60, h=30),
+    ]
+    assert _offers(boxes)[0][:2] == ("Cream", "₹350")

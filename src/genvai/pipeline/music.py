@@ -4,14 +4,26 @@
 named. The split is the whole point: searching is free and reversible, downloading is
 neither, and a design where one call does both has no moment at which to ask.
 
+`attach` is the third way: a file the user already has, named by path. Naming the file
+is the consent, and nothing touches the network.
+
 See 'Music consent' in docs/decisions.md.
 """
+
+from pathlib import Path
 
 from genvai.beats import snap  # noqa: F401  (re-exported for callers that align cuts)
 from genvai.errors import GenvaiError
 from genvai.pipeline.select import fit_to_beats
 from genvai.ports import BeatDetector, MusicProvider, ProjectStore
-from genvai.timeline import AssetProvenance, MusicQuery, Timeline
+from genvai.timeline import AssetProvenance, Export, MusicQuery, Timeline
+
+SOLE_TRACK_DB = -3.0
+"""Gain for a track that is the only sound in the cut.
+
+The default bed level, -18 dB, is set to sit under narration. A promo has none, and at
+-18 the track is barely audible on a phone speaker.
+"""
 
 
 def suggest(
@@ -66,6 +78,7 @@ def approve(
     candidate_id: str,
     *,
     confirmed: bool,
+    gain_db: float | None = None,
 ) -> Timeline:
     """Fetch an approved track, analyse its beat, and align the cuts to it.
 
@@ -100,11 +113,48 @@ def approve(
                     "asset_id": asset.sha256,
                     "state": "resolved",
                     "beat_map": beats,
+                    **({"gain_db": gain_db} if gain_db is not None else {}),
                 }
             ),
         }
     )
-    return _save(store, project_id, fit_to_beats(resolved))
+    return _save(store, project_id, fit_to_beats(_with_full_cut(resolved)))
+
+
+def attach(
+    project_id: str,
+    store: ProjectStore,
+    detector: BeatDetector,
+    track: Path,
+    *,
+    gain_db: float | None = None,
+) -> Timeline:
+    """Use a track the user handed over by path, and align the cuts to its beat.
+
+    `gain_db` overrides the bed level - pass `SOLE_TRACK_DB` when nothing else in the
+    cut makes a sound.
+    """
+    if not track.is_file():
+        raise GenvaiError(f"No audio file at {track}")
+
+    timeline = store.load_timeline(project_id)
+    asset = store.store_asset(
+        project_id, track, "audio", AssetProvenance(provider="user", prompt=track.name)
+    )
+    beats = detector.detect(track) if detector.is_available() else None
+    music = timeline.music.model_copy(
+        update={
+            "state": "resolved",
+            "asset_id": asset.sha256,
+            "selected_candidate_id": None,
+            "beat_map": beats,
+            **({"gain_db": gain_db} if gain_db is not None else {}),
+        }
+    )
+    resolved = timeline.model_copy(
+        update={"assets": {**timeline.assets, asset.sha256: asset}, "music": music}
+    )
+    return _save(store, project_id, fit_to_beats(_with_full_cut(resolved)))
 
 
 def decline(project_id: str, store: ProjectStore) -> Timeline:
@@ -119,6 +169,19 @@ def decline(project_id: str, store: ProjectStore) -> Timeline:
             }
         ),
     )
+
+
+def _with_full_cut(timeline: Timeline) -> Timeline:
+    """Make sure a cut with the music is exported, now that there is music.
+
+    A promo exports only the silent cut until a track is chosen - a "full" cut with no
+    track in it is the same file twice, and it promised sound it did not have.
+    """
+    variants = timeline.export.audio_variants
+    if "full" in variants:
+        return timeline
+    export: Export = timeline.export.model_copy(update={"audio_variants": ("full", *variants)})
+    return timeline.model_copy(update={"export": export})
 
 
 def _save(store: ProjectStore, project_id: str, timeline: Timeline) -> Timeline:

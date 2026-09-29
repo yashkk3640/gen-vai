@@ -30,12 +30,17 @@ genvai add trip ~/Pictures/trip/        # import and analyse a camera roll
 genvai reel trip --duration 30          # pick, trim, sequence, caption
 genvai music trip --mood "calm piano"   # suggest tracks (downloads nothing)
 genvai music trip --approve <id>        # use one, and cut to its beat
+genvai music trip --file song.mp3       # or a track of your own
 genvai edit trip "drop the third clip"  # change it in plain English
 
 genvai create "why compound interest matters" -d 20   # no footage needed
 
 genvai promo gk offer.png --occasion "Diwali offer"   # a reel from a price list
+genvai promo gk offer.png --style countdown --music song.mp3
 ```
+
+`promo` has five shapes - `classic`, `question`, `from`, `menu-first`, `countdown` -
+picked by seed unless you name one, so two reels for one client do not come out alike.
 
 | Command | What it does | Ready |
 | --- | --- | --- |
@@ -63,7 +68,8 @@ version of the edit, and every render. Copy it to another machine and it still w
   ask for; the diff it prints before applying is the safeguard.
 - **Use a 3B model.** A 9B one spills off a 4 GB card and times out - measurements in
   [docs/setup.md](docs/setup.md).
-- **Bring your own music.** Nothing ships with the project.
+- **Bring your own music.** Nothing ships with the project. Without a track, `promo`
+  exports only the silent cut rather than a "full" one with nothing in it.
 - **`promo` shows you what it read before building.** OCR pairs a service to its
   price by position, which is imperfect on unusual layouts. Check every price.
 
@@ -71,7 +77,7 @@ Fuller list in [TODO.md](TODO.md).
 
 ## Status
 
-**All eight milestones are done** — import, select, reframe, beat-align, render,
+**All nine milestones are done** — import, select, reframe, beat-align, render,
 edit, undo, and idea mode. What is left is refinement; see [TODO.md](TODO.md).
 
 ## Docs

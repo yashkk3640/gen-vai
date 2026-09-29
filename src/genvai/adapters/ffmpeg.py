@@ -436,10 +436,12 @@ class FFmpegRenderer:
             return out
 
         gain = 10 ** (timeline.music.gain_db / 20)
+        # normalize=0: amix otherwise divides every input by the input count, so the bed
+        # came out 6 dB under its own gain_db and a -3 dB promo track peaked near -20.
         graph = (
             f"[1:a]volume={gain:.4f},afade=t=out:st="
             f"{max(0.0, timeline.duration - 1.5):.4f}:d=1.5[bed];"
-            "[0:a][bed]amix=inputs=2:duration=first:dropout_transition=0[a]"
+            "[0:a][bed]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[a]"
         )
         command = [
             *base,
@@ -632,6 +634,10 @@ def _drawtext(
         f"y={y_template.format(**geometry)}",
         f"line_spacing={round(size * (style.line_spacing - 1))}",
     ]
+    if position.endswith("center"):
+        # Centre each line in the block, not just the block: a wrapped caption otherwise
+        # hangs its short second line off the left edge of its long first one.
+        parts.append("text_align=C")
     if style.stroke_px > 0:
         parts += [f"borderw={style.stroke_px}", f"bordercolor={style.stroke_color}"]
 
@@ -672,7 +678,12 @@ def _wrap(text: str, width: int) -> str:
     A word longer than the line is broken rather than left to overflow. Without this a
     single long token - a phone number, a URL, a hashtag - runs off the side of the frame
     with nothing at all to signal it, which is worse than an ugly break.
+
+    Line breaks already in the text are kept - a price list is written one per line.
     """
+    if "\n" in text:
+        return "\n".join(_wrap(line, width) for line in text.splitlines() if line.strip())
+
     lines: list[str] = []
     current = ""
     for word in text.split():

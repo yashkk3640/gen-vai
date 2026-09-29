@@ -16,7 +16,7 @@ import re
 from pydantic import Field
 
 from genvai.promo import Brief, Offer
-from genvai.timeline import Frozen
+from genvai.timeline import Frozen, Rect
 
 MIN_CONFIDENCE = 0.55
 """Below this the characters are a guess, and a guessed price is the thing to avoid."""
@@ -34,6 +34,13 @@ SPANNING = 1.4
 A pill set across a two-line label is drawn tall enough to span both; a price on its
 own row is set at about the height of the line it belongs to.
 """
+
+GRID_REACH = 6.0
+"""How far above a grid price its label may sit, in price heights. An add-on grid puts a
+photograph between the label and the pill; the Navratri nail poster measures 4.8."""
+
+HEADER_GAP = 1.2
+"""How far above a price a column header may sit, in price heights."""
 
 PRICE = re.compile(r"^[^\d]{0,4}(\d{2,5})(?:\.00?)?[^\d]{0,3}$")
 """A price: two to five digits with at most a little decoration. Bounded at five so a
@@ -83,6 +90,22 @@ class Box(Frozen):
         return " ".join(self.text.split()).strip(" .:~-•")
 
 
+def text_rects(boxes: list[Box], width: int, height: int) -> tuple[Rect, ...]:
+    """Where the words are, in fractions of the image, for keeping them out of a crop."""
+    if width <= 0 or height <= 0:
+        return ()
+    return tuple(
+        (
+            min(max(0.0, b.x / width), 1.0),
+            min(max(0.0, b.y / height), 1.0),
+            min(max(0.0, b.width / width), 1.0),
+            min(max(0.0, b.height / height), 1.0),
+        )
+        for b in boxes
+        if b.width > 0 and b.height > 0
+    )
+
+
 def read_brief(boxes: list[Box], *, occasion: str = "") -> Brief:
     """Assemble a brief from recognised text.
 
@@ -122,13 +145,19 @@ def join_wrapped(boxes: list[Box]) -> list[Box]:
             other = remaining[other_index]
             if other_index in used or _amount(other):
                 continue
-            if not _is_continuation(merged, other) or _has_own_price(other, priced, labels):
+            if not _is_continuation(merged, other):
                 continue
+            if _has_own_price(other, priced, labels) and not _wraps_onto(
+                merged, other, priced, labels
+            ):
+                continue
+            left = min(merged.x, other.x)
             merged = merged.model_copy(
                 update={
                     "text": f"{merged.cleaned} {other.cleaned}",
+                    "x": left,
                     "height": other.y + other.height - merged.y,
-                    "width": max(merged.width, other.width),
+                    "width": max(merged.right, other.right) - left,
                 }
             )
             used.add(other_index)
@@ -171,12 +200,42 @@ def _has_own_price(box: Box, priced: list[Box], labels: list[Box]) -> bool:
 
 
 def _is_continuation(first: Box, second: Box) -> bool:
-    """Whether `second` is the next line of the same label."""
+    """Whether `second` is the next line of the same label.
+
+    Aligned on the left edge, as a list is set, or on the centre, as a grid of options is.
+    """
+    # "Cream :-" introduces its small print; a label ending in a colon has not wrapped.
+    if first.text.rstrip().endswith((":", ":-")):
+        return False
     gap = second.y - (first.y + first.height)
+    reach = first.height * 0.9
+    ratio = second.height / max(first.height, 1e-6)
+    centred = abs((second.x + second.width / 2) - (first.x + first.width / 2)) <= reach
+    # A grid's centred labels are set tightly enough to come back from OCR overlapping by
+    # a pixel or two. Small print tucked under a list item overlaps too, but is set from
+    # the left edge rather than centred on it - so only centred lines get the allowance.
+    lowest = -first.height * 0.2 if centred else 0.0
     return (
-        0 <= gap <= first.height * 0.75
-        and abs(second.x - first.x) <= first.height * 0.9
-        and 0.7 <= second.height / max(first.height, 1e-6) <= 1.4
+        lowest <= gap <= first.height * 0.75
+        and (abs(second.x - first.x) <= reach or centred)
+        and 0.7 <= ratio <= 1.4
+    )
+
+
+def _wraps_onto(first: Box, second: Box, priced: list[Box], labels: list[Box]) -> bool:
+    """Whether a price level with `second` is really the price of `first` and `second`.
+
+    A price pill set beside a two-line label often lines up with the second line, and then
+    that line looks like it owns the price - the Navratri nail poster read "HAND 200" for
+    "GEL POLISH HAND". What separates it from a stacked list is the first line: in a list
+    every line has its own price, while the first line of a wrapped label has none. The
+    two lines must also be set alike - same size, same left edge - which a heading over
+    its first item ("FACIAL" over "Fruit Facial") is not.
+    """
+    return (
+        not _has_own_price(first, priced, labels)
+        and 0.8 <= second.height / max(first.height, 1e-6) <= 1.25
+        and abs(second.x - first.x) <= first.height * 0.5
     )
 
 
@@ -199,7 +258,7 @@ def pair_offers(boxes: list[Box]) -> list[Offer]:
             Offer(
                 service=label.cleaned,
                 price=f"₹{amount}",
-                note=_note_below(label, boxes),
+                note=_header_above(box, label, boxes) or _note_below(label, boxes),
             )
         )
     return offers
@@ -250,6 +309,10 @@ def _label_left_of(price: Box, boxes: list[Box]) -> Box | None:
     ]
     if not candidates:
         return None
+    # "Cream :-" over "full hand, half leg" - the colon names which line is the service
+    # when italic small print comes back as tall as its label.
+    introducing = [b for b in candidates if b.text.rstrip().endswith((":", ":-"))]
+    candidates = introducing or candidates
     tallest = max(b.height for b in candidates)
     return max((b for b in candidates if b.height >= tallest * 0.88), key=lambda b: b.right)
 
@@ -260,11 +323,48 @@ def _label_above(price: Box, boxes: list[Box]) -> Box | None:
         b
         for b in boxes
         if b is not price
-        and 0 < price.y - b.y <= price.height * 4.0
+        and 0 < price.y - b.y <= price.height * GRID_REACH
         and abs(b.x + b.width / 2 - (price.x + price.width / 2)) < max(b.width, price.width)
         and _is_label(b)
     ]
     return max(candidates, key=lambda b: b.y) if candidates else None
+
+
+def _header_above(price: Box, label: Box, boxes: list[Box]) -> str:
+    """A column header set over a price - "Original Nail", "Temporary Extension".
+
+    A table with two prices per service says which is which above each column. Without
+    it both prices come out under one name and one of them is dropped as a duplicate.
+
+    Only headers centred over the price count, and only for a price whose label is beside
+    it: a grid's label is itself above the price.
+    """
+    if label.y >= price.y:
+        return ""
+    lines: list[Box] = []
+    top = price.y
+    reach = price.height * HEADER_GAP
+    while True:
+        above = [
+            b
+            for b in boxes
+            if b is not price
+            and b is not label
+            and b not in lines
+            and not _amount(b)
+            # Joined headers run two lines tall, so the bound is generous; the centring
+            # is not - a tagline further up the poster was caught by a loose one.
+            and b.height < price.height * 1.5
+            and 0 <= top - (b.y + b.height) <= reach
+            and abs((b.x + b.width / 2) - (price.x + price.width / 2)) < price.width * 0.6
+        ]
+        if not above:
+            break
+        nearest = max(above, key=lambda b: b.y + b.height)
+        lines.append(nearest)
+        top = nearest.y
+        reach = nearest.height * 0.8
+    return " ".join(b.cleaned for b in reversed(lines))
 
 
 def _is_label(box: Box) -> bool:

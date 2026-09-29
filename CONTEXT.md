@@ -1,6 +1,7 @@
 # Context handoff
 
-Everything a fresh session needs. Written 2026-09-28, at commit `fbe612b`.
+Everything a fresh session needs. Written 2026-09-28, at commit `fbe612b`. Updated 2026-09-29 after the client's three
+complaints were fixed - see "What the client said last".
 
 Read [README.md](README.md) for usage and [TODO.md](TODO.md) for what is open. This file
 carries what those two do not: why things are the way they are, what was measured, and
@@ -19,7 +20,7 @@ what has already been tried and rejected.
 | `genvai create` | a text description, no footage | works |
 
 Plus `edit` (change it in plain English), `restore`, `music`, `render`, `media`, `list`,
-`doctor`. Nine milestones M0–M8 complete. **545 tests passing**, ruff clean.
+`doctor`. Nine milestones M0–M8 complete. **601 tests passing**, ruff clean.
 
 Everything runs locally. Nothing is uploaded. The only network call is a music download,
 and that is confirmation-gated.
@@ -46,6 +47,8 @@ Facts that shaped almost every decision:
 | `moondream` reading a poster | 138s, **invented prices**, dollars on a rupee poster |
 | RapidOCR reading the same poster | **4.4s, every price correct**, conf 0.94–1.00 |
 | Stable Diffusion adapter | **written but never run** — torch is not installed |
+| YuNet face detector | 0.13s per poster; real faces 0.86–0.92, nail thumbnails 0.74–0.80 |
+| YuNet, input size changed per call | **hangs** OpenCV 5 on the third image. Fixed at 1024 |
 
 ---
 
@@ -107,7 +110,13 @@ Each of these cost real time. They are in the code as comments, but collected he
 - **Ollama reports an untagged model as `name:latest`** — a bare config name needs both
   forms checked.
 - Bash heredocs in this environment mangle `\n` escapes in Python strings. Use the
-  Write/Edit tools for anything containing escapes.
+  Write/Edit tools for anything containing escapes. This bit three more times.
+- **ffmpeg `amix` divides each input by the input count** unless `normalize=0`. The bed
+  came out 6 dB under its own `gain_db`.
+- **Reels reserve the right 18% of the frame** for buttons (`safe_area.right`), so a
+  centred line holds ~26 characters at 3% type. A price list needs two lines per item.
+- **Rich crashes on `₹` when stdout is piped** on Windows (cp1252). Set
+  `PYTHONIOENCODING=utf-8` when capturing CLI output.
 
 ---
 
@@ -174,40 +183,34 @@ Both posters now read completely: **4/4 rows on nails, 10/10 on skin**.
 
 ### What the client said last
 
-Three things, all open:
+Three things, **all fixed on 2026-09-29**:
 
-1. **The two reels feel the same** — same concept, same sequence, same shape. Wants
-   something new and pleasant. The eight-beat structure in `pipeline/promo.py` is
-   hardcoded: hook → prices → menu card → CTA. It needs variety, or several templates.
-2. **The hand-built reel had better backdrops** — specifically the ones with a person in
-   them. The automatic region finder scores on "picture-likeness" and does not know a
-   face from a flower. Faces in the saliency map would fix both this and `face_area`.
-3. **The reels have no sound** — confirmed: the "full" cut measures −91 dB, digital
-   silence, because `promo` never asks about music. `genvai music` exists but promo does
-   not invoke it, and no music library is configured.
+1. **The two reels feel the same** → five structures in `pipeline/promo.py`
+   (`STRUCTURES`), picked by seed or `--style`. Beats are data, not branches.
+2. **Backdrops with people read better** → YuNet faces weight the region finder, and the
+   OCR'd words are painted out of the poster before backdrops are cut from it.
+3. **No sound** → `--music FILE` or a library pick; without one, only the silent cut is
+   exported. There is still no music library configured on this machine - the client
+   needs to supply a track, or add the trending sound in the app.
+
+`beauty parlor/navratri offer/` holds the next job: two Navratri posters and a logo.
 
 ---
 
 ## Open items, in the order I would do them
 
-1. **Make promo reels varied.** Several beat structures, chosen by seed or flag. Right
-   now every promo has the same shape and it shows immediately when you make two.
-2. **Wire music into `promo`.** Either call the existing suggest/approve flow, or stop
-   emitting a "full" variant that is identical to the silent one — the current output
-   promises audio and delivers silence.
-3. **Faces in the saliency map.** Fixes the backdrop quality complaint and makes
-   `ClipQuality.face_area` non-zero. Costs a dependency: OpenCV Haar is cheap, a small
-   ONNX detector is better.
-4. **Check what is actually trending** before designing the new structures. This session
-   could not — knowledge runs to May 2026 and trends move weekly. Worth searching for
-   current Reels pacing conventions, hook patterns, and Raksha Bandhan audio.
-5. **Tune thresholds against a real camera roll.** Still the highest-value item for the
+1. **Tune thresholds against a real camera roll.** Still the highest-value item for the
    camera-roll path, and still not done.
-6. **Nail-art add-ons are not read** — a grid where the price pill sits under a *wrapped*
-   label. `_label_above` handles grids, `join_wrapped` handles wrapped labels, but not
-   both at once.
-7. Narration/TTS (`resolve_narration` is a stub), verifying the Stable Diffusion adapter,
+2. **The dancer is not found as a face** - profile, stylised. The hook backdrop on the
+   nails poster is therefore a nail thumbnail, not the best picture on it. A "person"
+   detector, or letting the user pin a region, would fix it.
+3. A word touching a photo survives erasure ("ART" above a nail thumbnail).
+4. Narration/TTS (`resolve_narration` is a stub), verifying the Stable Diffusion adapter,
    trending-audio discovery.
+
+Trends were checked on 2026-09-29: the hook has to land in the first 1–2 s; question
+hooks and countdowns are the formats most cited for small-business offers. No source
+named trending Navratri audio - that has to be picked in the app on the day.
 
 ---
 
@@ -230,7 +233,8 @@ GENVAI_PROJECTS_DIR=/tmp/smoke uv run genvai promo demo \
   --occasion "Raksha Bandhan offer" --business "Nails by Gracy" --yes
 ```
 
-Expect a confirmation table with four services, then a 7-beat 17.8s reel.
+Expect a confirmation table with eleven services (four main, seven add-ons), then a
+reel whose shape depends on the seed. Add `--style classic` for a fixed one.
 
 ---
 

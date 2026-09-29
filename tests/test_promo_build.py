@@ -6,7 +6,8 @@ import numpy as np
 import pytest
 from PIL import Image, ImageDraw
 
-from genvai.pipeline.promo import build, choose
+from genvai.errors import GenvaiError
+from genvai.pipeline.promo import STYLES, build, choose, structure_for
 from genvai.promo import Brief, Offer
 from genvai.timeline import Asset, AssetProvenance, AssetVisual, Canvas, Timeline
 
@@ -152,6 +153,12 @@ def test_a_silent_cut_is_always_exported(poster: Path, keeper, tmp_path: Path) -
     assert "silent" in timeline.export.audio_variants
 
 
+def test_no_full_cut_is_promised_without_music(poster: Path, keeper, tmp_path: Path) -> None:
+    """It measured -91 dB: the same silent file under a name that promised sound."""
+    timeline = build(_brief(), (poster,), tmp_path / "work", store_asset=keeper)
+    assert timeline.export.audio_variants == ("silent",)
+
+
 def test_consecutive_beats_do_not_move_identically(poster: Path, keeper, tmp_path: Path) -> None:
     timeline = build(_brief(), (poster,), tmp_path / "work", store_asset=keeper)
     moves = [(s.motion.start_rect, s.motion.end_rect) for s in timeline.scenes[:3]]  # type: ignore[union-attr]
@@ -175,3 +182,102 @@ def test_building_is_deterministic(poster: Path, keeper, tmp_path: Path) -> None
     first = build(_brief(), (poster,), tmp_path / "a", store_asset=keeper, seed=7)
     second = build(_brief(), (poster,), tmp_path / "b", store_asset=keeper, seed=7)
     assert [s.model_dump() for s in first.scenes] == [s.model_dump() for s in second.scenes]
+
+
+# ---------------------------------------------------------------------- structures
+
+
+def _shape(timeline: Timeline) -> tuple[tuple[str, str], ...]:
+    return tuple((s.role, s.transition_in.kind) for s in timeline.scenes)
+
+
+@pytest.mark.parametrize("style", STYLES)
+def test_every_style_shows_every_featured_price(
+    style: str, poster: Path, keeper, tmp_path: Path
+) -> None:
+    brief = _brief()
+    timeline = build(brief, (poster,), tmp_path / "work", store_asset=keeper, style=style)
+    shown = " ".join(o.content for s in timeline.scenes for o in s.overlays)
+    for offer in choose(brief.offers, 3):
+        assert offer.price in shown
+
+
+@pytest.mark.parametrize("style", STYLES)
+def test_every_style_has_the_menu_and_closes_on_the_phone(
+    style: str, poster: Path, keeper, tmp_path: Path
+) -> None:
+    timeline = build(_brief(), (poster,), tmp_path / "work", store_asset=keeper, style=style)
+    footers = {o.content for s in timeline.scenes for o in s.overlays}
+    assert "SAVE THIS" in footers
+    assert timeline.scenes[-1].role == "cta"
+    assert timeline.scenes[0].transition_in.kind == "cut"
+
+
+def test_the_styles_are_different_shapes(poster: Path, keeper, tmp_path: Path) -> None:
+    shapes = {
+        _shape(build(_brief(), (poster,), tmp_path / s, store_asset=keeper, style=s))
+        for s in STYLES
+    }
+    assert len(shapes) == len(STYLES)
+
+
+def test_the_seed_picks_the_style_when_none_is_named() -> None:
+    assert {structure_for(None, seed).name for seed in range(len(STYLES))} == set(STYLES)
+
+
+def test_an_unknown_style_is_refused() -> None:
+    with pytest.raises(GenvaiError, match="countdown"):
+        structure_for("bogus", 0)
+
+
+def test_a_question_hook_does_not_repeat_its_price(poster: Path, keeper, tmp_path: Path) -> None:
+    timeline = build(_brief(), (poster,), tmp_path / "w", store_asset=keeper, style="question")
+    headlines = [
+        o.content for s in timeline.scenes for o in s.overlays if o.style_ref == "headline"
+    ]
+    assert headlines[0] == "₹40?"
+    assert "₹40" not in headlines[1:]
+
+
+def test_a_countdown_ends_on_the_cheapest(poster: Path, keeper, tmp_path: Path) -> None:
+    timeline = build(_brief(), (poster,), tmp_path / "w", store_asset=keeper, style="countdown")
+    payoff = next(s for s in timeline.scenes if s.role == "payoff")
+    assert payoff.overlays[0].content.startswith("#1")
+    assert any(o.content == "₹40" for o in payoff.overlays)
+
+
+def test_a_list_holds_three_services_a_screen(poster: Path, keeper, tmp_path: Path) -> None:
+    timeline = build(_brief(), (poster,), tmp_path / "w", store_asset=keeper, style="from")
+    lists = [o.content for s in timeline.scenes for o in s.overlays if o.style_ref == "list"]
+    assert lists
+    assert lists[0].count("\n") == 5, "three services, each a name over its price"
+
+
+def test_without_an_occasion_no_deadline_is_invented(poster: Path, keeper, tmp_path: Path) -> None:
+    brief = _brief().model_copy(update={"occasion": ""})
+    timeline = build(brief, (poster,), tmp_path / "w", store_asset=keeper, style="from")
+    assert all("statement" not in {o.style_ref for o in s.overlays} for s in timeline.scenes)
+
+
+def test_menu_first_opens_on_the_poster(poster: Path, keeper, tmp_path: Path) -> None:
+    timeline = build(_brief(), (poster,), tmp_path / "w", store_asset=keeper, style="menu-first")
+    assert timeline.scenes[0].role == "hook"
+    assert any(o.content == "SAVE THIS" for o in timeline.scenes[0].overlays)
+
+
+def test_a_list_puts_one_service_per_line_with_its_prices(
+    poster: Path, keeper, tmp_path: Path
+) -> None:
+    """A two-column menu is one service at two prices, not two services."""
+    brief = _brief().model_copy(
+        update={
+            "offers": (
+                _offer("GEL POLISH HAND", "₹200", "Original Nail"),
+                _offer("GEL POLISH HAND", "₹350", "Temporary Extension"),
+                _offer("TOE CAT EYE", "₹500"),
+            )
+        }
+    )
+    timeline = build(brief, (poster,), tmp_path / "w", store_asset=keeper, style="from")
+    lists = [o.content for s in timeline.scenes for o in s.overlays if o.style_ref == "list"]
+    assert lists[0].split("\n") == ["GEL POLISH HAND", "₹200 · ₹350", "TOE CAT EYE", "₹500"]

@@ -38,6 +38,34 @@ hand-built reel. Enough to beat a busier patch of ornament, not enough to lift a
 drawn in line art on bare paper over a real photograph.
 """
 
+TEXT_WEIGHT = 5.0
+"""How hard printed text inside a window counts against it, per unit of area.
+
+OCR boxes are tight around the glyphs, so a banner line crossing a window covers only a
+tenth of it - and still reads as a mistake behind a price. A tenth costs half the score;
+a fifth rules the window out.
+"""
+
+ERASE_PAD = 0.3
+"""Padding around a word box before it is painted out, as a fraction of its height.
+OCR boxes hug the glyphs; descenders, accents and outlines sit just outside them."""
+
+ERASE_MAX_HEIGHT = 0.045
+"""Word boxes taller than this, as a fraction of the picture, are left alone.
+
+Display script - the occasion's title, a slogan set across an illustration - comes back
+as one huge box that sweeps up whatever it overlaps. Erasing it cut blocks out of the
+dancer on both Navratri posters. Body type and prices are well under this."""
+
+RING = 4
+"""Pixels of surround sampled for the fill colour."""
+
+FLAT_GROUND = 7.0
+"""Median deviation of that surround above which it is not flat ground, and the word stays.
+
+Measured on the client posters: type on paper, pills and banners 0.7-6; script over
+ornament 8-14; script across the dancer 37."""
+
 FACE_HEIGHT = 0.34
 """Where a face sits in a window built around it, from the top.
 
@@ -51,6 +79,7 @@ def photo_regions(
     count: int = 4,
     aspect: float | None = None,
     faces: tuple[Face, ...] = (),
+    text: tuple[Rect, ...] = (),
 ) -> tuple[Rect, ...]:
     """The most picture-like rectangles in a layout, best first.
 
@@ -62,7 +91,9 @@ def photo_regions(
     been squeezed into 9:16.
 
     `faces` adds a window placed around each one to the candidates, and weights any
-    window holding a whole face above one that does not.
+    window holding a whole face above one that does not. `text` - where OCR found
+    words - counts against any window it falls in, so a backdrop does not carry half a
+    heading behind the reel's own type.
     """
     if image.ndim != 3 or image.size == 0:
         return ()
@@ -90,10 +121,75 @@ def photo_regions(
         if value <= 0:
             continue
         rect = (left / width, top / height, window_w / width, window_h / height)
-        scored.append((value * (1.0 + FACE_WEIGHT * _faces_held(rect, faces)), rect))
+        value *= 1.0 + FACE_WEIGHT * _faces_held(rect, faces)
+        value *= max(0.0, 1.0 - TEXT_WEIGHT * _text_cover(rect, text))
+        if value > 0:
+            scored.append((value, rect))
 
     scored.sort(key=lambda pair: -pair[0])
     return tuple(_spread_out(scored, count))
+
+
+def erase_text(
+    image: NDArray[np.uint8], text: tuple[Rect, ...]
+) -> tuple[NDArray[np.uint8], tuple[Rect, ...]]:
+    """The picture with its printed words painted out, for cutting backdrops from.
+
+    Each word box, padded, is filled with the median colour of a thin ring just outside
+    it. Print sets type on flat ground - paper, a pill, a banner - so the ring is that
+    ground and the fill is invisible. Where the ring is not flat - script lettering over
+    ornament, a caption across a photograph - the word is left alone: a flat block cut
+    into a picture is worse than the word.
+
+    Returns the picture and the body-sized words that could not be erased, which are the
+    ones still worth keeping out of a crop.
+
+    Deliberately not an inpainting model: this is a few lines of numpy and deterministic.
+    """
+    if image.ndim != 3 or not text:
+        return image, ()
+    height, width = image.shape[:2]
+    out = image.copy()
+    stubborn: list[Rect] = []
+    for rect in text:
+        x, y, w, h = rect
+        if h > ERASE_MAX_HEIGHT:
+            continue
+        pad = max(3, round(h * height * ERASE_PAD))
+        left, top = max(0, round(x * width) - pad), max(0, round(y * height) - pad)
+        right = min(width, round((x + w) * width) + pad)
+        bottom = min(height, round((y + h) * height) + pad)
+        if right <= left or bottom <= top:
+            continue
+        ring = _ring(image, left, top, right, bottom, RING)
+        if not ring.size:
+            continue
+        ground = np.median(ring, axis=0)
+        # Median deviation, not spread: the ring catches strokes of the next word over,
+        # which inflate a standard deviation on perfectly flat paper.
+        if float(np.median(np.abs(ring - ground).mean(axis=1))) <= FLAT_GROUND:
+            out[top:bottom, left:right] = ground.astype(np.uint8)
+        else:
+            stubborn.append(rect)
+    return out, tuple(stubborn)
+
+
+def _ring(
+    image: NDArray[np.uint8], left: int, top: int, right: int, bottom: int, thickness: int
+) -> NDArray[np.uint8]:
+    """The pixels in a band just outside a rectangle, as rows of RGB."""
+    height, width = image.shape[:2]
+    outer = image[
+        max(0, top - thickness) : min(height, bottom + thickness),
+        max(0, left - thickness) : min(width, right + thickness),
+        :3,
+    ]
+    mask = np.ones(outer.shape[:2], dtype=bool)
+    mask[
+        top - max(0, top - thickness) : bottom - max(0, top - thickness),
+        left - max(0, left - thickness) : right - max(0, left - thickness),
+    ] = False
+    return outer[mask]
 
 
 def score(patch: NDArray[np.uint8]) -> float:
@@ -148,6 +244,14 @@ def _faces_held(rect: Rect, faces: tuple[Face, ...]) -> float:
             continue
         held += face.confidence * _shared(rect, face.rect) / face.area
     return min(1.0, held)
+
+
+def _text_cover(rect: Rect, text: tuple[Rect, ...]) -> float:
+    """What fraction of a window printed text covers."""
+    area = rect[2] * rect[3]
+    if area <= 0 or not text:
+        return 0.0
+    return min(1.0, sum(_shared(rect, box) for box in text) / area)
 
 
 def _shared(a: Rect, b: Rect) -> float:

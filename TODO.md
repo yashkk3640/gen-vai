@@ -40,35 +40,32 @@ Things that work as designed but that you should know before trusting the output
 - [ ] Image overlays (logo/watermark) parse but do not draw
 - [ ] Captions are not burned from narration — needs real audio timings, which needs TTS
 - [ ] `resolve_narration` is a stub; the TTS port has no implementation
-- [ ] `face_area` is always 0 — reframing uses detail saliency, not faces
 - [ ] The Stable Diffusion provider is written but has never been run
-- [ ] Promo backdrops still catch a little neighbouring type at a region's edge
+- [ ] Promo backdrops keep a word when the ground around it is not flat - a caption
+      touching a photo, a banner on a gradient. Everything on flat ground is erased
 - [ ] Pairing a service to its price is imperfect on unusual layouts — hence the
       confirmation table
 
 - [x] **M8** Promo mode — a reel from designed artwork, no script to write.
       `genvai promo`
 
-## Next up - from the client's feedback on the two reels
+## Done - from the client's feedback on the two reels
 
-- [ ] **Promo reels are all the same shape.** The beat structure in `pipeline/promo.py`
-      is hardcoded - hook, prices, menu card, CTA - so two reels for one client look
-      like the same reel twice. Needs several structures, picked by seed or flag
-- [ ] **The "full" cut has no sound.** Measured at -91 dB: digital silence. `promo`
-      never asks about music, so both variants are identical. Either wire in the
-      existing suggest/approve flow or stop emitting a variant that promises audio
-- [ ] **Backdrops with people in them read better.** The region finder scores on
-      picture-likeness and cannot tell a face from a flower. Faces in the saliency map
-      fixes this and `face_area` at the same time
-- [ ] **Check what is actually trending** before redesigning the structures - this
-      session could not; knowledge runs to May 2026 and trends move weekly
-- [ ] Nail-art add-ons are still unread: a grid whose price sits under a *wrapped*
-      label. Grids and wrapped labels each work; both at once does not
+- [x] **Five promo structures** - classic, question, from, menu-first, countdown -
+      picked by seed or `--style`. Each differs in order, pacing and transition
+- [x] **Music in promo.** `--music FILE`, or pick from the library when one exists.
+      No track, no "full" cut. The bed mix no longer loses 6 dB to `amix`
+- [x] **Faces in the saliency map** (YuNet, bundled). Backdrops, reframing, `face_area`
+- [x] **Printed words erased from backdrops** using the OCR boxes already read
+- [x] **Trends checked** (Sept 2026): hook in the first 1-2 s, question hooks,
+      countdowns. Trending *audio* could not be established - pick it in the app
+- [x] **Every poster reads completely**: nail add-on grids, two-price columns with
+      their headers, labels whose price sits by their second line. 14/14, 10/10,
+      11/11, 10/10 on the four client posters
 
 ## Worth doing next
 
 - [ ] Tune the thresholds against a **real** camera roll. Highest value of anything here
 - [ ] Narration: implement the Piper TTS adapter and `resolve_narration`
 - [ ] Verify the Stable Diffusion adapter on real hardware
-- [ ] Faces weighted into the saliency map, which would also make `face_area` non-zero
 - [ ] Trending-audio discovery — see [docs/backlog.md](docs/backlog.md)

@@ -253,3 +253,23 @@ def test_a_long_word_among_short_ones_does_not_lose_the_others() -> None:
     assert "".join(_wrap("hi supercalifragilistic bye", 8).split("\n")).replace(" ", "") == (
         "hisupercalifragilisticbye"
     )
+
+
+def test_line_breaks_in_the_text_are_kept() -> None:
+    """A price list is written one offer per line; flattening it runs them together."""
+    from genvai.adapters.ffmpeg import _wrap
+
+    assert _wrap("WAX  250\nBLEACH  250", 30).split("\n") == ["WAX 250", "BLEACH 250"]
+
+
+def test_centred_text_centres_each_line(tmp_path: Path) -> None:
+    """Otherwise a short second line hangs off the left edge of a long first one."""
+    from genvai.adapters.ffmpeg import _drawtext
+    from genvai.timeline import TextStyle
+
+    def graph(position: str) -> str:
+        return _drawtext("a b", position, TextStyle(), Canvas(), 2.0, 0.0, None, tmp_path / "t.txt")
+
+    assert "text_align=C" in graph("center")
+    assert "text_align=C" in graph("bottom_center")
+    assert "text_align" not in graph("bottom_left")

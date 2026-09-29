@@ -17,9 +17,18 @@ from genvai.timeline import Frozen
 
 MAX_SERVICE = 28
 MAX_NOTE = 40
-MAX_OFFERS = 12
+MAX_OFFERS = 16
+"""A two-column nail menu with its add-on grid runs to fourteen. The reel features a few;
+the rest are for the confirmation table and the list beats."""
 
 _DIGIT = re.compile(r"\d")
+
+_EDGE = " .:~-*|\u2022\u00b7\uff1a"
+"""Bullets and leaders OCR leaves on the ends of a label: a middle dot, a bullet, a
+full-width colon. On screen they read as a rendering fault."""
+
+_ASIDE = re.compile(r"\s*\(([^()]*)\)?\s*$")
+"""A trailing parenthetical - 'EYEBROW (Uparlips Free)' - which is small print, not name."""
 
 
 class Offer(Frozen):
@@ -39,12 +48,22 @@ class Offer(Frozen):
         return bool(_DIGIT.search(self.price))
 
     def tidy(self) -> "Offer":
-        """Trim to what fits on screen, without changing the wording."""
+        """Trim to what fits on screen, without changing the wording.
+
+        Stray bullets come off the ends, and a trailing parenthetical moves to the note
+        where there is not one already - it is the poster's small print.
+        """
+        service = " ".join(self.service.split()).strip(_EDGE)
+        note = " ".join(self.note.split()).strip(_EDGE)
+        aside = _ASIDE.search(service)
+        if aside and service[: aside.start()].strip(_EDGE):
+            note = note or aside.group(1).strip(_EDGE)
+            service = service[: aside.start()].strip(_EDGE)
         return self.model_copy(
             update={
-                "service": self.service.strip()[:MAX_SERVICE],
+                "service": service[:MAX_SERVICE],
                 "price": self.price.strip(),
-                "note": self.note.strip()[:MAX_NOTE],
+                "note": note[:MAX_NOTE],
             }
         )
 
@@ -72,7 +91,9 @@ class Brief(Frozen):
         seen: set[str] = set()
         for offer in self.offers:
             tidied = offer.tidy()
-            key = tidied.service.casefold()
+            # Keyed with the note: one service at two prices - original nail and
+            # extension - is two offers, not a duplicate.
+            key = f"{tidied.service.casefold()}|{tidied.note.casefold()}"
             if not tidied.service or not tidied.looks_like_a_price or key in seen:
                 continue
             seen.add(key)

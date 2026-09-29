@@ -12,16 +12,19 @@ Nothing here invents a price. The offers come from OCR and are confirmed by the 
 before this is called.
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter
 
+from genvai.errors import GenvaiError
 from genvai.palette import Brand, brand
 from genvai.ports import FaceDetector
 from genvai.promo import Brief, Offer
-from genvai.regions import photo_regions
+from genvai.regions import erase_text, photo_regions
 from genvai.timeline import (
     Asset,
     AssetProvenance,
@@ -52,8 +55,17 @@ that use more beats do not repeat a picture as soon."""
 OFFER_SECONDS = 2.5
 CARD_SECONDS = 2.9
 HOOK_SECONDS = 2.8
+QUESTION_SECONDS = 2.6
 CTA_SECONDS = 3.4
+DEADLINE_SECONDS = 2.4
 DISSOLVE = 0.22
+
+LIST_ROWS = 3
+LIST_SCREENS = 3
+LIST_SECONDS = 3.4
+"""Three services a screen, each on two lines - the name, then its prices. One line each
+does not fit: the Reels buttons take the right 18% of the frame, which leaves 26
+characters, and a two-column nail menu runs to 31."""
 
 SCRIM = 0.34
 """How far a backdrop is pulled toward the deep brand colour. White text has to sit on
@@ -80,10 +92,17 @@ def build(
     canvas: Canvas | None = None,
     seed: int = 0,
     featured: int = FEATURED,
+    style: str | None = None,
     store_asset: Callable[[Path, AssetProvenance], Asset],
     faces: FaceDetector | None = None,
+    text: Mapping[Path, tuple[Rect, ...]] | None = None,
 ) -> Timeline:
     """Turn a confirmed brief and its artwork into a renderable timeline.
+
+    `style` names one of `STRUCTURES`; left out, the seed picks one, so two reels for
+    the same client come out as different shapes rather than the same reel twice.
+
+    `text` is where OCR found words on each poster, kept out of the backdrops.
 
     `store_asset` is passed in rather than a store, so composition stays unaware of how
     projects are kept and can be exercised against a temporary directory.
@@ -91,11 +110,12 @@ def build(
     frame = canvas or Canvas()
     work.mkdir(parents=True, exist_ok=True)
     palette = _palette_of(posters)
+    structure = structure_for(style, seed)
 
-    backdrops = _backdrops(posters, palette, frame, work, faces)
+    backdrops = _backdrops(posters, palette, frame, work, faces, text or {})
+    cards = tuple(_poster_card(poster, palette, frame, work) for poster in posters)
     chosen = choose(brief.offers, featured)
 
-    scenes: list[Scene] = []
     assets: dict[str, Asset] = {}
 
     def add(image: Path, note: str) -> str:
@@ -103,70 +123,39 @@ def build(
         assets[asset.sha256] = asset
         return asset.sha256
 
-    # 1. The occasion, over the most picture-like part of the artwork.
-    scenes.append(
-        _scene(
-            "s1",
-            HOOK_SECONDS,
-            add(backdrops[0], "hook"),
-            role="hook",
-            index=0,
-            label=brief.occasion.upper() or brief.business.upper(),
-            headline=brief.tagline or "SPECIAL OFFER",
-            footer=brief.business if brief.occasion else "",
-            first=True,
-        )
-    )
+    beats: list[_Beat] = []
+    for kind in structure.beats:
+        beats.extend(_BEATS[kind](brief, chosen, structure, len(beats)))
 
-    # 2. One beat per featured offer, cycling the remaining backdrops.
-    for position, offer in enumerate(chosen):
-        # Cycle from the second onward, wrapping. Modulo the whole list, not the list
-        # minus one: artwork with a single usable region produced an index past the end.
-        backdrop = backdrops[(1 + position) % len(backdrops)]
-        scenes.append(
-            _scene(
-                f"s{len(scenes) + 1}",
-                OFFER_SECONDS,
-                add(backdrop, f"{offer.service} {offer.price}"),
-                role="body",
-                index=len(scenes),
-                label=offer.service.upper(),
-                headline=offer.price,
-                footer=offer.note,
+    scenes: list[Scene] = []
+    used = 0
+    for beat in beats:
+        if beat.picture == "card":
+            images = [
+                (card, f"menu {poster.stem}") for card, poster in zip(cards, posters, strict=True)
+            ]
+        elif beat.picture == "first":
+            images = [(backdrops[0], beat.note)]
+        else:
+            images = [(backdrops[used % len(backdrops)], beat.note)]
+            used += 1
+        for image, note in images:
+            index = len(scenes)
+            scenes.append(
+                _scene(
+                    f"s{index + 1}",
+                    beat.seconds,
+                    add(image, note),
+                    role=beat.role,
+                    index=index,
+                    label=beat.label,
+                    headline=beat.headline,
+                    footer=beat.footer,
+                    headline_style=beat.headline_style,
+                    transition=None if index == 0 else structure.transition(),
+                    still=beat.picture == "card" or beat.still,
+                )
             )
-        )
-
-    # 3. Each poster whole, as the moment to screenshot.
-    for poster in posters:
-        card = _poster_card(poster, palette, frame, work)
-        scenes.append(
-            _scene(
-                f"s{len(scenes) + 1}",
-                CARD_SECONDS,
-                add(card, f"menu {poster.stem}"),
-                role="body",
-                index=len(scenes),
-                label="FULL MENU",
-                headline="",
-                footer="SAVE THIS",
-                still=True,
-            )
-        )
-
-    # 4. How to book.
-    if brief.phone:
-        scenes.append(
-            _scene(
-                f"s{len(scenes) + 1}",
-                CTA_SECONDS,
-                add(backdrops[-1], "cta"),
-                role="cta",
-                index=len(scenes),
-                label="",
-                headline=_spaced(brief.phone),
-                footer=f"{brief.business} - call or DM to book".strip(" -"),
-            )
-        )
 
     return Timeline(
         intent=f"{brief.occasion or 'offer'} - {brief.business or 'promo'}".strip(" -"),
@@ -176,9 +165,10 @@ def build(
         assets=assets,
         styles=_styles(palette),
         captions=Captions(enabled=False),
-        # Silent as well as full: the reach comes from attaching a trending sound in the
-        # app, and a baked-in track forfeits it.
-        export=Export(audio_variants=("silent", "full"), snap_cuts_to_beat=False),
+        # Silent only, until a track is attached: a "full" cut with no music in it is
+        # the silent cut twice. The silent cut stays either way, because the reach comes
+        # from attaching a trending sound in the app. Snapping is a no-op until then.
+        export=Export(audio_variants=("silent",), snap_cuts_to_beat=True),
     )
 
 
@@ -201,6 +191,318 @@ def choose(offers: tuple[Offer, ...], count: int = FEATURED) -> tuple[Offer, ...
     return (cheapest, *spread)
 
 
+# -------------------------------------------------------------------- structures
+
+
+@dataclass(frozen=True)
+class Structure:
+    """The shape of a reel: which beats, in what order, cut how.
+
+    Data rather than code paths, so a new shape is a new entry and not a new branch.
+    """
+
+    name: str
+    blurb: str
+    beats: tuple[str, ...]
+    offer_seconds: float
+    cut: str = "dissolve"
+    cut_seconds: float = DISSOLVE
+
+    def transition(self) -> Transition:
+        if self.cut == "cut":
+            return Transition(kind="cut")
+        return Transition(kind=self.cut, duration=self.cut_seconds)  # type: ignore[arg-type]
+
+
+STRUCTURES: tuple[Structure, ...] = (
+    Structure(
+        "classic",
+        "the occasion, a beat per price, the menu, how to book",
+        ("hook", "offers", "menu", "cta"),
+        offer_seconds=OFFER_SECONDS,
+    ),
+    Structure(
+        "question",
+        "opens on the cheapest price as a question, then fast cuts",
+        ("question", "offers", "menu", "cta"),
+        offer_seconds=1.8,
+        cut="cut",
+    ),
+    Structure(
+        "from",
+        "opens on the lowest price, then the whole menu as stacked lists",
+        ("from", "list", "deadline", "menu", "cta"),
+        offer_seconds=OFFER_SECONDS,
+        cut="push",
+        cut_seconds=0.3,
+    ),
+    Structure(
+        "menu-first",
+        "opens on the full menu to screenshot, then the highlights",
+        ("menu", "offers", "cta"),
+        offer_seconds=2.3,
+        cut="slide",
+        cut_seconds=0.3,
+    ),
+    Structure(
+        "countdown",
+        "top picks counted down, the best price last",
+        ("top", "countdown", "menu", "cta"),
+        offer_seconds=2.2,
+        cut="wipe",
+        cut_seconds=0.25,
+    ),
+)
+"""Trend advice checked in September 2026: the hook has to land in the first one or two
+seconds, so three of these put a price in the very first frame. Question hooks and
+countdowns are the formats most often cited for small-business offers."""
+
+STYLES = tuple(s.name for s in STRUCTURES)
+
+
+def structure_for(style: str | None, seed: int) -> Structure:
+    """A named structure, or one picked by seed when none is named."""
+    if style is None:
+        return STRUCTURES[seed % len(STRUCTURES)]
+    for structure in STRUCTURES:
+        if structure.name == style:
+            return structure
+    raise GenvaiError(f"No promo style '{style}'. Choose from: {', '.join(STYLES)}")
+
+
+@dataclass(frozen=True)
+class _Beat:
+    """One beat before it has a picture. `picture` says which one it gets."""
+
+    role: str
+    seconds: float
+    label: str
+    headline: str
+    footer: str
+    note: str
+    picture: Literal["next", "first", "card"] = "next"
+    headline_style: str = "headline"
+    still: bool = False
+
+
+_BeatMaker = Callable[[Brief, tuple[Offer, ...], Structure, int], tuple[_Beat, ...]]
+
+
+def _hook(
+    brief: Brief, chosen: tuple[Offer, ...], structure: Structure, at: int
+) -> tuple[_Beat, ...]:
+    return (
+        _Beat(
+            "hook",
+            HOOK_SECONDS,
+            label=_title(brief),
+            headline=brief.tagline or "SPECIAL OFFER",
+            footer=brief.business if brief.occasion else "",
+            note="hook",
+            picture="first",
+        ),
+    )
+
+
+def _question(
+    brief: Brief, chosen: tuple[Offer, ...], structure: Structure, at: int
+) -> tuple[_Beat, ...]:
+    if not chosen:
+        return _hook(brief, chosen, structure, at)
+    lead = chosen[0]
+    return (
+        _Beat(
+            "hook",
+            QUESTION_SECONDS,
+            label=f"{lead.service} for just",
+            headline=f"{lead.price}?",
+            footer=brief.occasion or brief.business,
+            note=f"question {lead.service}",
+            picture="first",
+        ),
+    )
+
+
+def _from(
+    brief: Brief, chosen: tuple[Offer, ...], structure: Structure, at: int
+) -> tuple[_Beat, ...]:
+    if not chosen:
+        return _hook(brief, chosen, structure, at)
+    return (
+        _Beat(
+            "hook",
+            HOOK_SECONDS,
+            label=_title(brief),
+            headline=f"FROM {chosen[0].price}",
+            footer=brief.business if brief.occasion else "",
+            note="from",
+            picture="first",
+        ),
+    )
+
+
+def _top(
+    brief: Brief, chosen: tuple[Offer, ...], structure: Structure, at: int
+) -> tuple[_Beat, ...]:
+    picks = chosen
+    if len(picks) < 2:
+        return _hook(brief, chosen, structure, at)
+    return (
+        _Beat(
+            "hook",
+            HOOK_SECONDS,
+            label=_title(brief),
+            headline=f"TOP {len(picks)} PICKS",
+            footer=brief.business if brief.occasion else "",
+            note="top picks",
+            picture="first",
+        ),
+    )
+
+
+def _offers(
+    brief: Brief, chosen: tuple[Offer, ...], structure: Structure, at: int
+) -> tuple[_Beat, ...]:
+    # A question hook has already shown the cheapest; do not show it twice.
+    shown = chosen[1:] if "question" in structure.beats and chosen else chosen
+    return tuple(
+        _Beat(
+            "body",
+            structure.offer_seconds,
+            label=offer.service,
+            headline=offer.price,
+            footer=offer.note,
+            note=f"{offer.service} {offer.price}",
+        )
+        for offer in shown
+    )
+
+
+def _countdown(
+    brief: Brief, chosen: tuple[Offer, ...], structure: Structure, at: int
+) -> tuple[_Beat, ...]:
+    picks = chosen
+    if len(picks) < 2:
+        return _offers(brief, chosen, structure, at)
+    # choose() puts the cheapest first; counting down makes it the #1 reveal.
+    ranked = sorted(enumerate(picks, start=1), key=lambda pair: -pair[0])
+    return tuple(
+        _Beat(
+            "payoff" if rank == 1 else "body",
+            structure.offer_seconds,
+            label=f"#{rank}  {offer.service}",
+            headline=offer.price,
+            footer=offer.note,
+            note=f"#{rank} {offer.service} {offer.price}",
+        )
+        for rank, offer in ranked
+    )
+
+
+def _list(
+    brief: Brief, chosen: tuple[Offer, ...], structure: Structure, at: int
+) -> tuple[_Beat, ...]:
+    rows = _rows(brief.offers)[: LIST_ROWS * LIST_SCREENS]
+    screens = [rows[i : i + LIST_ROWS] for i in range(0, len(rows), LIST_ROWS)]
+    return tuple(
+        _Beat(
+            "body",
+            LIST_SECONDS,
+            label="THE MENU" if index == 0 else "AND MORE",
+            headline="\n".join(screen),
+            footer="",
+            note=f"list {index}",
+            headline_style="list",
+            still=True,
+        )
+        for index, screen in enumerate(screens)
+    )
+
+
+def _rows(offers: tuple[Offer, ...]) -> list[str]:
+    """One entry per service, its prices side by side beneath it.
+
+    A two-column menu reads as the same name twice at two prices; grouped - "GEL POLISH
+    HAND", then "200 · 350" - it reads as what it is, and takes half the screen.
+    """
+    prices: dict[str, list[str]] = {}
+    for offer in offers:
+        prices.setdefault(offer.service, []).append(offer.price)
+    return [f"{service}\n{' · '.join(amounts)}" for service, amounts in prices.items()]
+
+
+def _deadline(
+    brief: Brief, chosen: tuple[Offer, ...], structure: Structure, at: int
+) -> tuple[_Beat, ...]:
+    # Without an occasion there is no deadline to state, and inventing one is out.
+    if not brief.occasion:
+        return ()
+    return (
+        _Beat(
+            "body",
+            DEADLINE_SECONDS,
+            label=brief.business,
+            headline=brief.occasion.upper(),
+            footer="book before it ends",
+            note="deadline",
+            headline_style="statement",
+        ),
+    )
+
+
+def _menu(
+    brief: Brief, chosen: tuple[Offer, ...], structure: Structure, at: int
+) -> tuple[_Beat, ...]:
+    opening = at == 0
+    return (
+        _Beat(
+            "hook" if opening else "body",
+            CARD_SECONDS + (0.4 if opening else 0.0),
+            label=_title(brief) if opening else "FULL MENU",
+            headline="",
+            footer="SAVE THIS",
+            note="menu",
+            picture="card",
+        ),
+    )
+
+
+def _cta(
+    brief: Brief, chosen: tuple[Offer, ...], structure: Structure, at: int
+) -> tuple[_Beat, ...]:
+    if not brief.phone:
+        return ()
+    return (
+        _Beat(
+            "cta",
+            CTA_SECONDS,
+            label="",
+            headline=_spaced(brief.phone),
+            footer=f"{brief.business} - call or DM to book".strip(" -"),
+            note="cta",
+            picture="first",
+        ),
+    )
+
+
+_BEATS: dict[str, _BeatMaker] = {
+    "hook": _hook,
+    "question": _question,
+    "from": _from,
+    "top": _top,
+    "offers": _offers,
+    "countdown": _countdown,
+    "list": _list,
+    "deadline": _deadline,
+    "menu": _menu,
+    "cta": _cta,
+}
+
+
+def _title(brief: Brief) -> str:
+    return (brief.occasion or brief.business).upper()
+
+
 # ------------------------------------------------------------------- composition
 
 
@@ -215,10 +517,13 @@ def _backdrops(
     canvas: Canvas,
     work: Path,
     faces: FaceDetector | None = None,
+    text: Mapping[Path, tuple[Rect, ...]] | None = None,
 ) -> list[Path]:
     """One scrimmed backdrop per picture-like region found across the artwork.
 
-    With a face detector, regions holding a face rank first - the backdrops the client
+    Printed words OCR found are painted out first, so a backdrop does not carry half a
+    heading behind the reel's own type. With a face detector, regions holding a face
+    rank first - the backdrops the client
     liked in the hand-built reel were the ones with a person in them.
 
     Always returns something. A poster that is nothing but type yields no regions, and a
@@ -231,7 +536,11 @@ def _backdrops(
             picture = opened.convert("RGB")
             array = np.asarray(picture)
         found = detector.detect(array) if detector else ()
-        regions = photo_regions(array, count=REGIONS, aspect=canvas.aspect, faces=found)
+        clean, stubborn = erase_text(array, (text or {}).get(poster, ()))
+        picture = Image.fromarray(clean, "RGB")
+        regions = photo_regions(
+            clean, count=REGIONS, aspect=canvas.aspect, faces=found, text=stubborn
+        )
         for index, rect in enumerate(regions):
             out = work / f"bd-{poster.stem[:16]}-{index}.png"
             _scrimmed(picture, rect, palette, canvas).save(out)
@@ -359,7 +668,8 @@ def _scene(
     label: str,
     headline: str,
     footer: str,
-    first: bool = False,
+    headline_style: str = "headline",
+    transition: Transition | None = None,
     still: bool = False,
 ) -> Scene:
     start, end = _STILL if still else _MOVES[index % len(_MOVES)]
@@ -367,7 +677,7 @@ def _scene(
     if label:
         overlays.append(TextOverlay(content=label, position="top_center", style_ref="label"))
     if headline:
-        overlays.append(TextOverlay(content=headline, position="center", style_ref="headline"))
+        overlays.append(TextOverlay(content=headline, position="center", style_ref=headline_style))
     if footer:
         overlays.append(TextOverlay(content=footer, position="bottom_center", style_ref="footer"))
 
@@ -378,9 +688,7 @@ def _scene(
         visual=AssetVisual(asset_id=asset_id, fit="cover"),
         motion=KenBurns(start_rect=start, end_rect=end),
         overlays=tuple(overlays),
-        transition_in=Transition(kind="cut")
-        if first
-        else Transition(kind="dissolve", duration=DISSOLVE),
+        transition_in=transition or Transition(kind="cut"),
     )
 
 
@@ -407,6 +715,24 @@ def _styles(palette: Brand) -> dict[str, TextStyle]:
             stroke_color=edge,
             stroke_px=12,
             max_chars_per_line=14,
+        ),
+        "list": TextStyle(
+            font="seguibl",
+            size_pct=3.6,
+            color="#FFFFFF",
+            stroke_color=edge,
+            stroke_px=7,
+            max_chars_per_line=32,
+            line_spacing=1.3,
+            uppercase=True,
+        ),
+        "statement": TextStyle(
+            font="seguibl",
+            size_pct=7.0,
+            color="#FFFFFF",
+            stroke_color=edge,
+            stroke_px=10,
+            max_chars_per_line=16,
         ),
         "footer": TextStyle(
             font="segoeuib",

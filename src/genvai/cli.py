@@ -11,6 +11,7 @@ import sys
 from pathlib import Path
 
 import typer
+from PIL import Image
 from rich.console import Console
 from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn
 from rich.table import Table
@@ -27,12 +28,16 @@ from genvai.adapters.rapid_ocr import RapidOcrVision
 from genvai.adapters.yunet_faces import YunetFaces
 from genvai.config import Settings, load_settings
 from genvai.errors import GenvaiError, RenderError
+from genvai.ocr import read_brief, text_rects
 from genvai.pipeline.edit import edit as run_edit
 from genvai.pipeline.ingest import ingest, summarise
+from genvai.pipeline.music import SOLE_TRACK_DB
 from genvai.pipeline.music import approve as approve_music
+from genvai.pipeline.music import attach as attach_music
 from genvai.pipeline.music import decline as decline_music
 from genvai.pipeline.music import suggest as suggest_music
 from genvai.pipeline.plan import plan as plan_idea
+from genvai.pipeline.promo import STYLES, structure_for
 from genvai.pipeline.promo import build as build_promo
 from genvai.pipeline.promo import choose as choose_offers
 from genvai.pipeline.render import plan_render
@@ -40,7 +45,7 @@ from genvai.pipeline.render import render as render_timeline
 from genvai.pipeline.resolve import resolve_visuals
 from genvai.pipeline.select import make_reel
 from genvai.promo import Brief
-from genvai.timeline import Canvas, Timeline
+from genvai.timeline import Canvas, Rect, Timeline
 
 app = typer.Typer(
     name="genvai",
@@ -310,6 +315,10 @@ def promo(
     aspect: str = typer.Option("9:16", "--aspect", help="9:16, 16:9 or 1:1."),
     featured: int = typer.Option(4, "--featured", help="How many offers get their own beat."),
     seed: int = typer.Option(0, "--seed", help="0 picks a random seed and records it."),
+    style: str = typer.Option(
+        None, "--style", help=f"Reel shape: {', '.join(STYLES)}. Default: picked by seed."
+    ),
+    track: Path = typer.Option(None, "--music", help="An audio file of your own to put under it."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation."),
 ) -> None:
     """Make a reel from offer artwork - a poster, a price list, a flyer.
@@ -319,6 +328,12 @@ def promo(
     """
     settings = load_settings()
     store = FilesystemStore(settings.projects_dir)
+    if style is not None and style not in STYLES:
+        console.print(f"[red]No style '{style}'.[/red] Choose from: {', '.join(STYLES)}")
+        raise typer.Exit(code=1)
+    if track is not None and not track.is_file():
+        console.print(f"[red]No audio file at {track}[/red]")
+        raise typer.Exit(code=1)
     created = store.create(occasion or f"promo from {posters[0].stem}", project)
 
     reader = RapidOcrVision()
@@ -330,9 +345,13 @@ def promo(
         raise typer.Exit(code=1)
 
     brief = Brief(occasion=occasion, business=business)
+    text: dict[Path, tuple[Rect, ...]] = {}
     with console.status("reading the artwork"):
         for poster in posters:
-            brief = brief.merge(reader.read(poster))
+            boxes = reader.boxes(poster)
+            brief = brief.merge(read_brief(boxes) if boxes else Brief())
+            with Image.open(poster) as opened:
+                text[poster] = text_rects(boxes, *opened.size)
     brief = brief.model_copy(
         update={
             "occasion": occasion or brief.occasion,
@@ -367,25 +386,36 @@ def promo(
         console.print("[dim]Nothing built. Correct the artwork or pass the offers yourself.[/dim]")
         return
 
+    seed = seed or _random_seed()
+    structure = structure_for(style, seed)
     timeline = build_promo(
         brief,
         tuple(posters),
         store.project_dir(created.id) / "cache" / "promo",
         canvas=_canvas_for(aspect),
-        seed=seed or _random_seed(),
+        seed=seed,
         featured=featured,
+        style=structure.name,
         store_asset=lambda image, provenance: store.store_asset(
             created.id, image, "image", provenance
         ),
         faces=_faces(settings),
+        text=text,
     )
     if duration > 0:
         timeline = _scaled_to(timeline, duration)
     store.save_timeline(created.id, timeline)
 
+    try:
+        timeline = _promo_music(created.id, store, settings, track, brief, ask=not yes) or timeline
+    except GenvaiError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from exc
+
     console.print(
-        f"[bold]{created.id}[/bold] v{timeline.version}  {len(timeline.scenes)} beats  "
-        f"{timeline.duration:.1f}s  {timeline.canvas.width}x{timeline.canvas.height}"
+        f"[bold]{created.id}[/bold] v{timeline.version}  [cyan]{structure.name}[/cyan] "
+        f"({structure.blurb})  {len(timeline.scenes)} beats  {timeline.duration:.1f}s  "
+        f"{timeline.canvas.width}x{timeline.canvas.height}"
     )
     renderer = FFmpegRenderer(
         settings.render, lambda asset_id: store.asset_path(created.id, asset_id)
@@ -401,10 +431,16 @@ def promo(
     for variant, path in outputs.items():
         console.print(f"  [green]{variant}[/green]  {path}")
     console.print()
-    console.print(
-        "[dim]Upload the silent cut and attach a trending sound in the app - a baked-in "
-        "track forfeits that reach.[/dim]"
-    )
+    if "full" not in outputs:
+        console.print(
+            "[dim]Silent cut only - no track was chosen. Attach a trending sound in the "
+            "app, or add your own with --music.[/dim]"
+        )
+    else:
+        console.print(
+            "[dim]For reach, upload the silent cut and attach a trending sound in the app; "
+            "the full cut is for places with no sound library.[/dim]"
+        )
 
 
 @app.command()
@@ -554,6 +590,7 @@ def music(
     project: str = typer.Argument(..., help="Project id."),
     mood: str = typer.Option("", "--mood", help="What it should sound like."),
     approve_id: str = typer.Option(None, "--approve", help="Candidate id to use."),
+    track: Path = typer.Option(None, "--file", help="Use an audio file of your own."),
     none: bool = typer.Option(False, "--none", help="Render without music."),
 ) -> None:
     """Suggest tracks, or approve one.
@@ -569,6 +606,12 @@ def music(
         if none:
             timeline = decline_music(project, store)
             console.print(f"[bold]{project}[/bold] v{timeline.version}  no music")
+            return
+
+        if track is not None:
+            timeline = attach_music(project, store, FFmpegBeatDetector(resolve_ffmpeg()), track)
+            console.print(f"[bold]{project}[/bold] v{timeline.version}  music set - {track.name}")
+            console.print(f"[dim]Render it with: genvai render {project}[/dim]")
             return
 
         if approve_id:
@@ -623,6 +666,50 @@ def _not_yet(command: str, milestone: str) -> None:
         "[dim]See TODO.md for what is built and what comes next.[/dim]"
     )
     raise typer.Exit(code=2)
+
+
+def _promo_music(
+    project: str,
+    store: FilesystemStore,
+    settings: Settings,
+    track: Path | None,
+    brief: Brief,
+    *,
+    ask: bool,
+) -> Timeline | None:
+    """Put a track under a promo, if there is one to put.
+
+    A file named with --music is used as given. Otherwise, when a music library exists
+    and there is someone to ask, its matches are listed and one may be picked - nothing
+    is ever chosen on the user's behalf. None means the reel stays silent.
+    """
+    detector = FFmpegBeatDetector(resolve_ffmpeg())
+    if track is not None:
+        return attach_music(project, store, detector, track, gain_db=SOLE_TRACK_DB)
+
+    provider = LocalMusicProvider(settings.music)
+    if not ask or not provider.is_available():
+        return None
+
+    mood = f"{brief.occasion} festive upbeat".strip()
+    try:
+        suggested = suggest_music(project, store, provider, mood=mood)
+    except GenvaiError:
+        return None
+
+    table = Table(show_header=True, header_style="bold", title="tracks in your library")
+    table.add_column("Id")
+    table.add_column("Track", overflow="fold")
+    table.add_column("Licence")
+    for candidate in suggested.music.candidates:
+        table.add_row(candidate.id, candidate.title, candidate.licence)
+    console.print(table)
+    choice = typer.prompt("Track id to use (blank for none)", default="", show_default=False)
+    if not choice.strip():
+        return decline_music(project, store)
+    return approve_music(
+        project, store, provider, detector, choice.strip(), confirmed=True, gain_db=SOLE_TRACK_DB
+    )
 
 
 def _faces(settings: Settings) -> YunetFaces:

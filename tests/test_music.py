@@ -288,3 +288,77 @@ def test_each_music_step_is_its_own_version(project, library: Path) -> None:
     second = decline("t", project)
     assert second.version > first.version
     assert project.load_timeline("t", first.version).music.state == "candidates_ready"
+
+
+# ------------------------------------------------------------------ a file of your own
+
+
+def _silent_only(store) -> None:
+    """Shape the project's timeline like a promo: silent cut only."""
+    from genvai.timeline import Export
+
+    timeline = store.load_timeline("t")
+    store.save_timeline(
+        "t",
+        timeline.model_copy(
+            update={"export": Export(audio_variants=("silent",)), "version": timeline.version + 1}
+        ),
+    )
+
+
+def test_attaching_a_file_resolves_without_a_library(project, library: Path) -> None:
+    from genvai.adapters.beat import FFmpegBeatDetector
+    from genvai.pipeline.music import attach
+
+    track = library / "night-drive.mp3"
+    timeline = attach("t", project, FFmpegBeatDetector(Path("absent")), track)
+    assert timeline.music.state == "resolved"
+    asset = timeline.assets[timeline.music.asset_id]
+    assert asset.kind == "audio"
+    assert asset.provenance.provider == "user"
+
+
+def test_attaching_adds_the_full_cut(project, library: Path) -> None:
+    """A promo exports silent only until there is something to hear."""
+    from genvai.adapters.beat import FFmpegBeatDetector
+    from genvai.pipeline.music import attach
+
+    _silent_only(project)
+    timeline = attach("t", project, FFmpegBeatDetector(Path("absent")), library / "night-drive.mp3")
+    assert timeline.export.audio_variants == ("full", "silent")
+
+
+def test_a_sole_track_is_turned_up(project, library: Path) -> None:
+    from genvai.adapters.beat import FFmpegBeatDetector
+    from genvai.pipeline.music import SOLE_TRACK_DB, attach
+
+    timeline = attach(
+        "t",
+        project,
+        FFmpegBeatDetector(Path("absent")),
+        library / "night-drive.mp3",
+        gain_db=SOLE_TRACK_DB,
+    )
+    assert timeline.music.gain_db == SOLE_TRACK_DB
+
+
+def test_attaching_a_missing_file_is_refused(project, tmp_path: Path) -> None:
+    from genvai.adapters.beat import FFmpegBeatDetector
+    from genvai.errors import GenvaiError
+    from genvai.pipeline.music import attach
+
+    with pytest.raises(GenvaiError, match="No audio file"):
+        attach("t", project, FFmpegBeatDetector(Path("absent")), tmp_path / "nope.mp3")
+
+
+def test_approving_adds_the_full_cut(project, library: Path) -> None:
+    from genvai.adapters.beat import FFmpegBeatDetector
+    from genvai.pipeline.music import approve, suggest
+
+    _silent_only(project)
+    provider = LocalMusicProvider(MusicSettings(library_dir=library))
+    suggest("t", project, provider, mood="calm")
+    timeline = approve(
+        "t", project, provider, FFmpegBeatDetector(Path("x")), "quiet-hours", confirmed=True
+    )
+    assert "full" in timeline.export.audio_variants

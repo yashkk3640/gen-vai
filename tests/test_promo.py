@@ -234,3 +234,34 @@ def test_the_poster_is_downscaled_before_sending(poster: Path) -> None:
 def test_the_schema_has_no_unresolved_references() -> None:
     """Ollama does not follow $ref, so a nested model would constrain nothing."""
     assert "$ref" not in json.dumps(_schema())
+
+
+def test_bullets_come_off_a_label() -> None:
+    """OCR keeps the poster's bullet dots; on screen they read as a rendering fault."""
+    for raw in ("\u00b7EYEBROW", "\u2022 EYEBROW", "\uff1aEYEBROW", "EYEBROW ~"):
+        assert Offer(service=raw, price="40").tidy().service == "EYEBROW"
+
+
+def test_a_trailing_aside_becomes_the_note() -> None:
+    tidied = Offer(service="EYEBROW (Uparlips Free)", price="40").tidy()
+    assert tidied.service == "EYEBROW"
+    assert tidied.note == "Uparlips Free"
+
+
+def test_an_unclosed_aside_still_moves() -> None:
+    tidied = Offer(service="MANICURE-PEDICURE (Half hand, leg.", price="600").tidy()
+    assert tidied.service == "MANICURE-PEDICURE"
+    assert tidied.note.startswith("Half hand")
+
+
+def test_an_existing_note_is_not_overwritten() -> None:
+    tidied = Offer(service="EYEBROW (Uparlips Free)", price="40", note="threading").tidy()
+    assert tidied.note == "threading"
+
+
+def test_a_label_that_is_only_an_aside_is_kept() -> None:
+    assert Offer(service="(FREE)", price="0").tidy().service == "(FREE)"
+
+
+def test_a_middle_dot_inside_a_label_stays() -> None:
+    assert Offer(service="WAX \u00b7 Sugar", price="250").tidy().service == "WAX \u00b7 Sugar"
